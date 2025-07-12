@@ -195,7 +195,7 @@ The plan should include:
 6. Specific prompts for AI video generation
 
 Make the plan actionable and detailed enough for AI video generation tools."""
-        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        ).with_model("gemini", "gemini-2.0-flash")
         
         plan_prompt = f"""Based on this video analysis, create a detailed video production plan:
 
