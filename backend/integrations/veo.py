@@ -38,6 +38,8 @@ class VeoClient:
         
     def _get_next_api_key(self) -> str:
         """Get the next API key in rotation"""
+        if self.api_keys[0] == "dummy_key":
+            raise VeoError("No valid Gemini API keys configured for Veo integration")
         key = self.api_keys[self.current_key_index]
         self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
         return key
