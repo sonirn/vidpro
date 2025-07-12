@@ -336,10 +336,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Video upload interface with drag-and-drop"
-    - "Real-time video status tracking"
-    - "Chat interface for plan modifications"
-    - "Multi-step workflow interface"
+    - "RunwayML video generation integration"
+    - "Google Veo 2/3 video generation integration"
+    - "AI model selection service"
+    - "Video generation orchestration service"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
