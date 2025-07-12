@@ -27,3 +27,4 @@ emergentintegrations
 aiofiles>=23.2.1
 ffmpeg-python>=0.2.0
 pillow>=10.0.0
+httpx>=0.24.0
