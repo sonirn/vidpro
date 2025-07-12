@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 # Configuration
-BACKEND_URL = "https://01aaca64-0bf3-416f-a5c1-b94b866f5fea.preview.emergentagent.com/api"
+BACKEND_URL = "https://b49b1885-3071-4392-8367-35dc9482c25d.preview.emergentagent.com/api"
 TEST_TIMEOUT = 30
 
 class VideoGenerationAPITester:
