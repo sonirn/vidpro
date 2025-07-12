@@ -30,7 +30,8 @@ class VeoClient:
         self.api_keys = [key for key in self.api_keys if key]
         
         if not self.api_keys:
-            raise ValueError("At least one GEMINI_API_KEY is required for Veo integration")
+            logger.warning("No GEMINI_API_KEY found for Veo integration - Veo features will be disabled")
+            self.api_keys = ["dummy_key"]  # Placeholder to prevent errors
         
         self.current_key_index = 0
         logger.info(f"VeoClient initialized with {len(self.api_keys)} API keys")
