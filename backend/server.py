@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,10 +7,16 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime
-
+from datetime import datetime, timedelta
+import asyncio
+import aiofiles
+import json
+import tempfile
+import shutil
+from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+import random
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -20,37 +27,383 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title="Video Generation API", version="1.0.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
+# Global variables for API key rotation
+GEMINI_API_KEYS = [
+    os.environ.get('GEMINI_API_KEY_1'),
+    os.environ.get('GEMINI_API_KEY_2'),
+    os.environ.get('GEMINI_API_KEY_3')
+]
+CURRENT_GEMINI_KEY_INDEX = 0
+
+# Models
+class VideoAnalysisRequest(BaseModel):
+    video_id: str
+    user_prompt: Optional[str] = None
+
+class VideoAnalysisResponse(BaseModel):
+    video_id: str
+    analysis: Dict[str, Any]
+    plan: str
+    status: str
+
+class ChatMessage(BaseModel):
+    message: str
+    video_id: str
+    session_id: str
+
+class ChatResponse(BaseModel):
+    response: str
+    updated_plan: Optional[str] = None
+
+class VideoGenerationRequest(BaseModel):
+    video_id: str
+    final_plan: str
+    session_id: str
+
+class VideoStatus(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    filename: str
+    status: str  # "uploaded", "analyzing", "analyzed", "planning", "generating", "completed", "error"
+    analysis: Optional[Dict[str, Any]] = None
+    plan: Optional[str] = None
+    final_video_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(days=7))
+    progress: int = 0
+    error_message: Optional[str] = None
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    email: str
+    name: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-# Add your routes to the router instead of directly to app
+# Utility functions
+def get_next_gemini_key():
+    """Rotate between Gemini API keys for rate limiting"""
+    global CURRENT_GEMINI_KEY_INDEX
+    key = GEMINI_API_KEYS[CURRENT_GEMINI_KEY_INDEX]
+    CURRENT_GEMINI_KEY_INDEX = (CURRENT_GEMINI_KEY_INDEX + 1) % len(GEMINI_API_KEYS)
+    return key
+
+async def save_uploaded_file(file: UploadFile, video_id: str) -> str:
+    """Save uploaded file to temporary location"""
+    upload_dir = Path("uploads")
+    upload_dir.mkdir(exist_ok=True)
+    
+    file_path = upload_dir / f"{video_id}_{file.filename}"
+    
+    async with aiofiles.open(file_path, 'wb') as f:
+        content = await file.read()
+        await f.write(content)
+    
+    return str(file_path)
+
+async def analyze_video_with_gemini(video_path: str, user_prompt: str = None) -> Dict[str, Any]:
+    """Analyze video using Gemini API"""
+    try:
+        api_key = get_next_gemini_key()
+        
+        # Create Gemini chat instance
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"video_analysis_{uuid.uuid4()}",
+            system_message="""You are an expert video analyst. Analyze the provided video in extreme detail including:
+            1. Visual elements (objects, people, actions, scenes, colors, lighting)
+            2. Audio elements (speech, music, sound effects, ambient sounds)
+            3. Overall narrative and story structure
+            4. Style and mood
+            5. Technical aspects (camera movements, transitions, effects)
+            6. Duration and pacing
+            
+            Provide a comprehensive analysis that will help create a similar video."""
+        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        
+        # Prepare video file
+        video_file = FileContentWithMimeType(
+            file_path=video_path,
+            mime_type="video/mp4"
+        )
+        
+        # Create analysis prompt
+        analysis_prompt = f"""Please analyze this video in extreme detail. I need to understand:
+        1. What exactly happens in this video from start to finish
+        2. All visual elements, objects, people, and actions
+        3. Audio analysis including speech, music, and sound effects
+        4. The overall style, mood, and narrative structure
+        5. Technical aspects like camera work and transitions
+        
+        {f'Additional context: {user_prompt}' if user_prompt else ''}
+        
+        Provide a comprehensive analysis in JSON format with these sections:
+        - visual_analysis
+        - audio_analysis
+        - narrative_structure
+        - style_and_mood
+        - technical_aspects
+        - duration_and_pacing
+        - key_moments
+        """
+        
+        user_message = UserMessage(
+            text=analysis_prompt,
+            file_contents=[video_file]
+        )
+        
+        response = await chat.send_message(user_message)
+        
+        # Try to parse as JSON, fallback to text
+        try:
+            analysis = json.loads(response)
+        except:
+            analysis = {"raw_analysis": response}
+        
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Error analyzing video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Video analysis failed: {str(e)}")
+
+async def generate_video_plan(analysis: Dict[str, Any]) -> str:
+    """Generate video creation plan based on analysis"""
+    try:
+        api_key = get_next_gemini_key()
+        
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"plan_generation_{uuid.uuid4()}",
+            system_message="""You are a professional video production planner. Based on the video analysis provided, create a detailed step-by-step plan to recreate a similar video. 
+
+The plan should include:
+1. Scene breakdown with timing
+2. Visual elements needed for each scene
+3. Audio requirements (music, effects, voiceover)
+4. Transitions and effects
+5. Technical specifications (aspect ratio 9:16, max 60 seconds)
+6. Specific prompts for AI video generation
+
+Make the plan actionable and detailed enough for AI video generation tools."""
+        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        
+        plan_prompt = f"""Based on this video analysis, create a detailed video production plan:
+
+        Analysis: {json.dumps(analysis, indent=2)}
+        
+        Create a comprehensive plan that includes:
+        1. Scene-by-scene breakdown with timing
+        2. Visual elements and composition for each scene
+        3. Audio strategy (background music, sound effects, voiceover)
+        4. Transitions and visual effects
+        5. Technical specifications (9:16 aspect ratio, under 60 seconds)
+        6. Specific AI generation prompts for each scene
+        7. Post-production steps for combining scenes
+        
+        Make sure the final video will be similar to the original but not an exact copy.
+        """
+        
+        user_message = UserMessage(text=plan_prompt)
+        response = await chat.send_message(user_message)
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error generating plan: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+
+# API Routes
+@api_router.post("/upload-video", response_model=VideoStatus)
+async def upload_video(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    user_prompt: Optional[str] = None
+):
+    """Upload video file for analysis"""
+    try:
+        # Validate file
+        if not file.filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
+            raise HTTPException(status_code=400, detail="Only video files are allowed")
+        
+        # Create video record
+        video_id = str(uuid.uuid4())
+        video_status = VideoStatus(
+            id=video_id,
+            filename=file.filename,
+            status="uploaded",
+            progress=10
+        )
+        
+        # Save to database
+        await db.videos.insert_one(video_status.dict())
+        
+        # Save file and start analysis in background
+        file_path = await save_uploaded_file(file, video_id)
+        background_tasks.add_task(process_video_analysis, video_id, file_path, user_prompt)
+        
+        return video_status
+        
+    except Exception as e:
+        logger.error(f"Error uploading video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+async def process_video_analysis(video_id: str, file_path: str, user_prompt: str = None):
+    """Background task to analyze video and generate plan"""
+    try:
+        # Update status to analyzing
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "analyzing", "progress": 20}}
+        )
+        
+        # Analyze video
+        analysis = await analyze_video_with_gemini(file_path, user_prompt)
+        
+        # Update status to planning
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "planning", "progress": 60, "analysis": analysis}}
+        )
+        
+        # Generate plan
+        plan = await generate_video_plan(analysis)
+        
+        # Update status to analyzed
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "analyzed", "progress": 80, "plan": plan}}
+        )
+        
+        # Clean up temporary file
+        try:
+            os.remove(file_path)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error processing video {video_id}: {str(e)}")
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "error", "error_message": str(e)}}
+        )
+
+@api_router.get("/video-status/{video_id}", response_model=VideoStatus)
+async def get_video_status(video_id: str):
+    """Get video processing status"""
+    video = await db.videos.find_one({"id": video_id})
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    return VideoStatus(**video)
+
+@api_router.post("/chat", response_model=ChatResponse)
+async def chat_with_plan(request: ChatMessage):
+    """Chat to modify video plan"""
+    try:
+        # Get video from database
+        video = await db.videos.find_one({"id": request.video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        if not video.get("plan"):
+            raise HTTPException(status_code=400, detail="Video plan not ready yet")
+        
+        api_key = get_next_gemini_key()
+        
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=request.session_id,
+            system_message=f"""You are a video production assistant. The user has a video plan and wants to make changes to it. 
+
+Current plan: {video['plan']}
+
+Help the user modify the plan based on their requests. Always respond with:
+1. A conversational response to their request
+2. If they want changes, provide the updated plan
+
+Keep the conversation natural and helpful."""
+        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        
+        user_message = UserMessage(
+            text=f"Current plan: {video['plan']}\n\nUser message: {request.message}"
+        )
+        
+        response = await chat.send_message(user_message)
+        
+        return ChatResponse(response=response)
+        
+    except Exception as e:
+        logger.error(f"Error in chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
+@api_router.post("/generate-video")
+async def generate_video(
+    request: VideoGenerationRequest,
+    background_tasks: BackgroundTasks
+):
+    """Start video generation process"""
+    try:
+        # Update video status
+        await db.videos.update_one(
+            {"id": request.video_id},
+            {"$set": {"status": "generating", "progress": 90, "plan": request.final_plan}}
+        )
+        
+        # Start video generation in background
+        background_tasks.add_task(process_video_generation, request.video_id, request.final_plan)
+        
+        return {"message": "Video generation started", "video_id": request.video_id}
+        
+    except Exception as e:
+        logger.error(f"Error starting video generation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
+
+async def process_video_generation(video_id: str, plan: str):
+    """Background task for video generation"""
+    try:
+        # This is a placeholder for actual video generation
+        # In a real implementation, this would use RunwayML or Veo APIs
+        await asyncio.sleep(30)  # Simulate generation time
+        
+        # For now, return a placeholder URL
+        final_video_url = f"https://placeholder.com/video_{video_id}.mp4"
+        
+        # Update video status
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {
+                "status": "completed",
+                "progress": 100,
+                "final_video_url": final_video_url
+            }}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating video {video_id}: {str(e)}")
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {"status": "error", "error_message": str(e)}}
+        )
+
+@api_router.get("/user-videos")
+async def get_user_videos():
+    """Get all user videos (simplified for MVP)"""
+    videos = await db.videos.find().to_list(100)
+    return [VideoStatus(**video) for video in videos]
+
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
+    return {"message": "Video Generation API is running"}
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -63,13 +416,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
