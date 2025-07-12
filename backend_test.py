@@ -348,6 +348,38 @@ class VideoGenerationAPITester:
             self.log_test("Video Generation", False, f"Generation error: {str(e)}")
         return False
     
+    def test_mongodb_connection(self):
+        """Test MongoDB connection by checking if data persists"""
+        if not self.video_id:
+            self.log_test("MongoDB Connection", False, "No video ID to test database persistence")
+            return False
+            
+        try:
+            # Wait a moment for any background processing
+            time.sleep(2)
+            
+            # Check if video exists in database by calling status endpoint
+            response = self.session.get(
+                f"{BACKEND_URL}/video-status/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("id") == self.video_id:
+                    self.log_test("MongoDB Connection", True, "Data persisted successfully in MongoDB", {
+                        "video_id": self.video_id,
+                        "status": data.get("status")
+                    })
+                    return True
+                else:
+                    self.log_test("MongoDB Connection", False, "Video ID mismatch in database")
+            else:
+                self.log_test("MongoDB Connection", False, f"Could not retrieve video from database: HTTP {response.status_code}")
+        except Exception as e:
+            self.log_test("MongoDB Connection", False, f"Database connection test error: {str(e)}")
+        return False
+    
     def test_user_videos(self):
         """Test GET /api/user-videos endpoint"""
         try:
