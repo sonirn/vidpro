@@ -292,10 +292,7 @@ test_plan:
     - "Real-time video status tracking"
     - "Chat interface for plan modifications"
     - "Multi-step workflow interface"
-  stuck_tasks: 
-    - "Gemini API integration for video analysis"
-    - "Video plan generation with AI"
-    - "Chat interface for plan modifications"
+  stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
