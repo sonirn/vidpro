@@ -154,6 +154,7 @@ class VideoGenerationAPITester:
             
         print(f"\n🔍 Monitoring Gemini analysis workflow for video {self.video_id}")
         print("Expected status progression: uploaded → analyzing → planning → analyzed")
+        print("Note: Test video may not be valid for analysis, testing API integration")
         
         max_wait_time = 120  # 2 minutes max wait
         check_interval = 5   # Check every 5 seconds
@@ -207,15 +208,28 @@ class VideoGenerationAPITester:
                         })
                         return True
                     
-                    # Check for error status
+                    # Check for error status - analyze the error
                     if current_status == "error":
                         error_msg = data.get("error_message", "Unknown error")
-                        self.log_test("Gemini Analysis Workflow", False, 
-                                    f"Analysis failed with error: {error_msg}", {
-                            "total_time": round(time.time() - start_time, 2),
-                            "status_progression": status_progression,
-                            "error_message": error_msg
-                        })
+                        
+                        # Check if it's a Gemini API integration issue vs invalid test file
+                        if "Request contains an invalid argument" in error_msg:
+                            self.log_test("Gemini Analysis Workflow", False, 
+                                        f"Gemini API integration issue - Invalid argument error (likely test file format)", {
+                                "total_time": round(time.time() - start_time, 2),
+                                "status_progression": status_progression,
+                                "error_message": error_msg,
+                                "error_type": "api_integration_issue",
+                                "gemini_model": "gemini-2.0-flash",
+                                "recommendation": "Test with a real video file to verify Gemini integration"
+                            })
+                        else:
+                            self.log_test("Gemini Analysis Workflow", False, 
+                                        f"Analysis failed with error: {error_msg}", {
+                                "total_time": round(time.time() - start_time, 2),
+                                "status_progression": status_progression,
+                                "error_message": error_msg
+                            })
                         return False
                 
                 time.sleep(check_interval)
