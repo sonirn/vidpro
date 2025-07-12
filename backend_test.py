@@ -487,6 +487,7 @@ class VideoGenerationAPITester:
         # Core API tests - Updated order to focus on Gemini integration
         tests = [
             ("Health Check", self.test_health_check),
+            ("Gemini API Connectivity", self.test_gemini_api_connectivity),
             ("Video Upload", self.test_video_upload),
             ("Video Status", self.test_video_status),
             ("MongoDB Connection", self.test_mongodb_connection),
