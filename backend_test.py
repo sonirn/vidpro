@@ -424,12 +424,13 @@ class VideoGenerationAPITester:
         print(f"Backend URL: {BACKEND_URL}")
         print("=" * 60)
         
-        # Core API tests
+        # Core API tests - Updated order to focus on Gemini integration
         tests = [
             ("Health Check", self.test_health_check),
             ("Video Upload", self.test_video_upload),
             ("Video Status", self.test_video_status),
             ("MongoDB Connection", self.test_mongodb_connection),
+            ("Gemini Analysis Workflow", self.test_gemini_analysis_workflow),
             ("Chat Interface", self.test_chat_interface),
             ("Video Generation", self.test_video_generation),
             ("User Videos", self.test_user_videos),
