@@ -400,7 +400,53 @@ class VideoGenerationAPITester:
             self.log_test("File Validation", False, f"File validation test error: {str(e)}")
         return False
     
-    def test_mongodb_connection(self):
+    def test_gemini_api_connectivity(self):
+        """Test basic Gemini API connectivity with gemini-2.0-flash model"""
+        try:
+            # Test if we can make a simple API call to Gemini without video
+            import requests
+            
+            # Get the first API key
+            api_key = "AIzaSyBwVEDRvZ2bHppZj2zN4opMqxjzcxpJCDk"  # From backend .env
+            
+            # Simple text-only request to test API connectivity
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": "Hello, can you respond with 'API working' to confirm connectivity?"
+                    }]
+                }]
+            }
+            
+            response = requests.post(url, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    response_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    self.log_test("Gemini API Connectivity", True, 
+                                f"Gemini API working with gemini-2.0-flash", {
+                        "response": response_text[:100],
+                        "status_code": response.status_code
+                    })
+                    return True
+                else:
+                    self.log_test("Gemini API Connectivity", False, 
+                                "Invalid response format from Gemini API", {"response": data})
+            else:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text
+                self.log_test("Gemini API Connectivity", False, 
+                            f"Gemini API error: HTTP {response.status_code}", {
+                    "error": error_data,
+                    "status_code": response.status_code
+                })
+                
+        except Exception as e:
+            self.log_test("Gemini API Connectivity", False, f"Gemini API connectivity test failed: {str(e)}")
+        
+        return False
         """Test MongoDB connection by checking if data persists"""
         if not self.video_id:
             self.log_test("MongoDB Connection", False, "No video ID to test database persistence")
