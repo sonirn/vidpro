@@ -713,20 +713,25 @@ class VideoGenerationAPITester:
     
     def run_all_tests(self):
         """Run all API tests"""
-        print("🚀 Starting Video Generation API Tests")
+        print("🚀 Starting Video Generation API Tests - Phase 2 Integration Testing")
         print(f"Backend URL: {BACKEND_URL}")
         print("=" * 60)
         
-        # Core API tests - Updated order to focus on Gemini integration
+        # Core API tests - Updated order to focus on Phase 2 video generation features
         tests = [
             ("Health Check", self.test_health_check),
             ("Gemini API Connectivity", self.test_gemini_api_connectivity),
+            ("RunwayML Integration", self.test_runway_integration_availability),
+            ("Veo Integration", self.test_veo_integration_availability),
             ("Video Upload", self.test_video_upload),
             ("Video Status", self.test_video_status),
             ("MongoDB Connection", self.test_mongodb_connection),
+            ("Model Recommendations", self.test_model_recommendations),
+            ("Generation Status Endpoint", self.test_generation_status_endpoint),
+            ("Cancel Generation Endpoint", self.test_cancel_generation_endpoint),
             ("Gemini Analysis Workflow", self.test_gemini_analysis_workflow),
             ("Chat Interface", self.test_chat_interface),
-            ("Video Generation", self.test_video_generation),
+            ("Video Generation Workflow", self.test_video_generation_workflow),
             ("User Videos", self.test_user_videos),
             ("File Validation", self.test_file_validation),
         ]
@@ -744,7 +749,7 @@ class VideoGenerationAPITester:
         print(f"📊 Test Results: {passed}/{total} tests passed")
         
         if passed == total:
-            print("🎉 All tests passed! Backend API is working correctly.")
+            print("🎉 All tests passed! Backend API with Phase 2 video generation is working correctly.")
         else:
             print("⚠️  Some tests failed. Check the details above.")
         
