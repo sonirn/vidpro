@@ -332,7 +332,7 @@ Help the user modify the plan based on their requests. Always respond with:
 2. If they want changes, provide the updated plan
 
 Keep the conversation natural and helpful."""
-        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        ).with_model("gemini", "gemini-2.0-flash")
         
         user_message = UserMessage(
             text=f"Current plan: {video['plan']}\n\nUser message: {request.message}"
