@@ -129,7 +129,7 @@ async def analyze_video_with_gemini(video_path: str, user_prompt: str = None) ->
             6. Duration and pacing
             
             Provide a comprehensive analysis that will help create a similar video."""
-        ).with_model("gemini", "gemini-2.5-pro-preview-05-06")
+        ).with_model("gemini", "gemini-2.0-flash")
         
         # Prepare video file
         video_file = FileContentWithMimeType(
