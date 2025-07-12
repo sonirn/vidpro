@@ -236,30 +236,55 @@ class VideoGenerationAPITester:
             return False
     
     def test_chat_interface(self):
-        """Test POST /api/chat endpoint"""
+        """Test POST /api/chat endpoint with enhanced Gemini integration testing"""
         if not self.video_id:
             self.log_test("Chat Interface", False, "No video ID available for chat test")
+            return False
+        
+        # First check if video has analysis and plan ready
+        try:
+            status_response = self.session.get(
+                f"{BACKEND_URL}/video-status/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                if status_data.get("status") != "analyzed" or not status_data.get("plan"):
+                    self.log_test("Chat Interface", False, 
+                                f"Video not ready for chat - Status: {status_data.get('status')}, Has plan: {bool(status_data.get('plan'))}")
+                    return False
+            else:
+                self.log_test("Chat Interface", False, "Could not check video status before chat test")
+                return False
+                
+        except Exception as e:
+            self.log_test("Chat Interface", False, f"Error checking video status: {str(e)}")
             return False
             
         try:
             chat_data = {
-                "message": "Can you make the video more colorful and add upbeat music?",
+                "message": "Can you make the video more colorful and add upbeat music? Also, make it exactly 30 seconds long.",
                 "video_id": self.video_id,
                 "session_id": self.session_id
             }
             
+            print(f"   Testing chat with gemini-2.0-flash model...")
             response = self.session.post(
                 f"{BACKEND_URL}/chat",
                 json=chat_data,
-                timeout=TEST_TIMEOUT
+                timeout=60  # Longer timeout for Gemini API
             )
             
             if response.status_code == 200:
                 data = response.json()
                 if "response" in data:
-                    self.log_test("Chat Interface", True, "Chat response received", {
-                        "response_length": len(data["response"]),
-                        "has_updated_plan": "updated_plan" in data
+                    response_text = data["response"]
+                    self.log_test("Chat Interface", True, 
+                                f"Chat with gemini-2.0-flash successful", {
+                        "response_length": len(response_text),
+                        "has_updated_plan": "updated_plan" in data,
+                        "response_preview": response_text[:200] + "..." if len(response_text) > 200 else response_text
                     })
                     return True
                 else:
