@@ -525,15 +525,23 @@ class VideoGenerationAPITester:
                 timeout=TEST_TIMEOUT
             )
             
-            # We expect this to fail with a proper error since it's a fake ID
-            if response.status_code == 500:
-                # This is expected for a non-existent generation ID
-                self.log_test("Generation Status Endpoint", True, 
-                            "Endpoint responds correctly to invalid generation ID", {
-                    "status_code": response.status_code,
-                    "endpoint_accessible": True
-                })
-                return True
+            # We expect this to return a proper JSON response for non-existent ID
+            if response.status_code == 200:
+                data = response.json()
+                if "generation_id" in data and "status" in data:
+                    if data["status"] == "NOT_FOUND":
+                        self.log_test("Generation Status Endpoint", True, 
+                                    "Endpoint correctly handles non-existent generation ID", {
+                            "status_code": response.status_code,
+                            "response_status": data["status"],
+                            "endpoint_accessible": True
+                        })
+                        return True
+                    else:
+                        self.log_test("Generation Status Endpoint", False, 
+                                    f"Unexpected status for non-existent ID: {data['status']}")
+                else:
+                    self.log_test("Generation Status Endpoint", False, "Invalid response format", {"response": data})
             elif response.status_code == 404:
                 self.log_test("Generation Status Endpoint", True, 
                             "Endpoint correctly returns 404 for non-existent generation", {
