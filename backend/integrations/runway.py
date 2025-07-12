@@ -20,11 +20,19 @@ class RunwayMLError(Exception):
 class RunwayMLClient:
     def __init__(self):
         self.api_key = os.environ.get('RUNWAY_API_KEY')
-        if not self.api_key:
-            raise ValueError("RUNWAY_API_KEY environment variable is required")
-        
         self.base_url = "https://api.runwayml.com/v1"
         self.timeout = 300  # 5 minutes timeout
+        
+        # Log initialization status
+        if self.api_key:
+            logger.info("RunwayML client initialized with API key")
+        else:
+            logger.warning("RunwayML client initialized without API key - generation will fail")
+    
+    def _check_api_key(self):
+        """Check if API key is available"""
+        if not self.api_key:
+            raise ValueError("RUNWAY_API_KEY environment variable is required")
         
     async def generate_video(
         self,
