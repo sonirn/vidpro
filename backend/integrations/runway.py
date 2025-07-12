@@ -127,6 +127,9 @@ class RunwayMLClient:
         Returns:
             Dict containing status and video URL if completed
         """
+        # Check API key availability
+        self._check_api_key()
+        
         try:
             endpoint = f"{self.base_url}/tasks/{task_id}"
             headers = {
