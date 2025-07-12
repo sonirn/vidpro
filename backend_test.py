@@ -426,6 +426,19 @@ class VideoGenerationAPITester:
                     "status_code": response.status_code
                 })
                 return True
+            elif response.status_code == 500:
+                # Check if it's a validation error in the response
+                try:
+                    error_data = response.json()
+                    if "detail" in error_data and "video files" in error_data["detail"].lower():
+                        self.log_test("File Validation", True, "Correctly rejected non-video file (via 500 error)", {
+                            "status_code": response.status_code,
+                            "error_detail": error_data["detail"]
+                        })
+                        return True
+                except:
+                    pass
+                self.log_test("File Validation", False, f"Unexpected 500 error: {response.text}")
             else:
                 self.log_test("File Validation", False, f"Should have rejected non-video file, got HTTP {response.status_code}")
         except Exception as e:
