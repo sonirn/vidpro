@@ -60,13 +60,13 @@
 **Status**: 🔄 **0% COMPLETE**
 
 #### **Current Tasks**:
-- ⏳ **RunwayML Integration** - Gen-4 Turbo API setup
-  - Status: Not started
+- 🔄 **RunwayML Integration** - Gen-4 Turbo API setup
+  - Status: Playbook obtained - implementing
   - Files: `/app/backend/integrations/runway.py`
   - API Key: Available in .env
   
-- ⏳ **Google Veo 2/3 Integration** - Through Gemini API
-  - Status: Not started  
+- 🔄 **Google Veo 2/3 Integration** - Through Gemini API
+  - Status: Playbook obtained - implementing  
   - Models: Use Gemini 2.5 Pro for Veo 2/3 access
   - Files: `/app/backend/integrations/veo.py`
   
