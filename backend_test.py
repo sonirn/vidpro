@@ -146,6 +146,95 @@ class VideoGenerationAPITester:
             self.log_test("Video Status", False, f"Status check error: {str(e)}")
         return False
     
+    def test_gemini_analysis_workflow(self):
+        """Test the complete Gemini analysis workflow with gemini-2.0-flash model"""
+        if not self.video_id:
+            self.log_test("Gemini Analysis Workflow", False, "No video ID available for analysis test")
+            return False
+            
+        print(f"\n🔍 Monitoring Gemini analysis workflow for video {self.video_id}")
+        print("Expected status progression: uploaded → analyzing → planning → analyzed")
+        
+        max_wait_time = 120  # 2 minutes max wait
+        check_interval = 5   # Check every 5 seconds
+        start_time = time.time()
+        
+        status_progression = []
+        analysis_data = None
+        plan_data = None
+        
+        try:
+            while time.time() - start_time < max_wait_time:
+                response = self.session.get(
+                    f"{BACKEND_URL}/video-status/{self.video_id}",
+                    timeout=TEST_TIMEOUT
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    current_status = data.get("status")
+                    progress = data.get("progress", 0)
+                    
+                    # Track status changes
+                    if not status_progression or status_progression[-1]["status"] != current_status:
+                        status_progression.append({
+                            "status": current_status,
+                            "progress": progress,
+                            "timestamp": time.time() - start_time
+                        })
+                        print(f"   Status: {current_status} (Progress: {progress}%)")
+                    
+                    # Check for analysis data
+                    if data.get("analysis") and not analysis_data:
+                        analysis_data = data["analysis"]
+                        print(f"   ✅ Analysis data received: {len(str(analysis_data))} characters")
+                    
+                    # Check for plan data
+                    if data.get("plan") and not plan_data:
+                        plan_data = data["plan"]
+                        print(f"   ✅ Plan data received: {len(plan_data)} characters")
+                    
+                    # Check for completion
+                    if current_status == "analyzed" and analysis_data and plan_data:
+                        self.log_test("Gemini Analysis Workflow", True, 
+                                    f"Complete analysis workflow successful with gemini-2.0-flash", {
+                            "total_time": round(time.time() - start_time, 2),
+                            "status_progression": status_progression,
+                            "has_analysis": bool(analysis_data),
+                            "has_plan": bool(plan_data),
+                            "analysis_size": len(str(analysis_data)),
+                            "plan_size": len(plan_data)
+                        })
+                        return True
+                    
+                    # Check for error status
+                    if current_status == "error":
+                        error_msg = data.get("error_message", "Unknown error")
+                        self.log_test("Gemini Analysis Workflow", False, 
+                                    f"Analysis failed with error: {error_msg}", {
+                            "total_time": round(time.time() - start_time, 2),
+                            "status_progression": status_progression,
+                            "error_message": error_msg
+                        })
+                        return False
+                
+                time.sleep(check_interval)
+            
+            # Timeout reached
+            self.log_test("Gemini Analysis Workflow", False, 
+                        f"Analysis workflow timed out after {max_wait_time} seconds", {
+                "total_time": max_wait_time,
+                "status_progression": status_progression,
+                "final_status": status_progression[-1]["status"] if status_progression else "unknown"
+            })
+            return False
+            
+        except Exception as e:
+            self.log_test("Gemini Analysis Workflow", False, f"Analysis workflow error: {str(e)}", {
+                "status_progression": status_progression
+            })
+            return False
+    
     def test_chat_interface(self):
         """Test POST /api/chat endpoint"""
         if not self.video_id:
