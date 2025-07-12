@@ -357,14 +357,24 @@ async def generate_video(
 ):
     """Start video generation process"""
     try:
+        # Get video data for analysis
+        video = await db.videos.find_one({"id": request.video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
         # Update video status
         await db.videos.update_one(
             {"id": request.video_id},
             {"$set": {"status": "generating", "progress": 90, "plan": request.final_plan}}
         )
         
-        # Start video generation in background
-        background_tasks.add_task(process_video_generation, request.video_id, request.final_plan)
+        # Start video generation in background with our new service
+        background_tasks.add_task(
+            process_video_generation_new, 
+            request.video_id, 
+            video.get("analysis", {}),
+            request.final_plan
+        )
         
         return {"message": "Video generation started", "video_id": request.video_id}
         
@@ -372,31 +382,111 @@ async def generate_video(
         logger.error(f"Error starting video generation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
 
-async def process_video_generation(video_id: str, plan: str):
-    """Background task for video generation"""
+async def process_video_generation_new(video_id: str, video_analysis: Dict[str, Any], plan: Dict[str, Any]):
+    """Background task for video generation using our new service"""
     try:
-        # This is a placeholder for actual video generation
-        # In a real implementation, this would use RunwayML or Veo APIs
-        await asyncio.sleep(30)  # Simulate generation time
+        logger.info(f"Starting video generation for {video_id}")
         
-        # For now, return a placeholder URL
-        final_video_url = f"https://placeholder.com/video_{video_id}.mp4"
+        # Use our video generation service
+        generation_result = await video_generation_service.generate_video(
+            video_id=video_id,
+            video_analysis=video_analysis,
+            video_plan=plan
+        )
         
-        # Update video status
+        # Update video with generation tracking info
         await db.videos.update_one(
             {"id": video_id},
             {"$set": {
-                "status": "completed",
-                "progress": 100,
-                "final_video_url": final_video_url
+                "generation_id": generation_result["generation_id"],
+                "generation_provider": generation_result["provider"],
+                "generation_model": generation_result["model"],
+                "generation_prompt": generation_result["prompt"],
+                "status": "generating",
+                "progress": 95
             }}
         )
         
-    except Exception as e:
-        logger.error(f"Error generating video {video_id}: {str(e)}")
+        # Monitor generation progress
+        generation_id = generation_result["generation_id"]
+        max_wait_time = 600  # 10 minutes
+        poll_interval = 15   # 15 seconds
+        start_time = datetime.utcnow()
+        
+        while True:
+            # Check generation status
+            status = await video_generation_service.get_generation_status(generation_id)
+            
+            # Update video progress
+            progress = 95 + (status.get("progress", 0) * 0.05)  # Scale to 95-100%
+            await db.videos.update_one(
+                {"id": video_id},
+                {"$set": {"progress": progress}}
+            )
+            
+            if status["status"] == "COMPLETED":
+                # Video generation completed successfully
+                await db.videos.update_one(
+                    {"id": video_id},
+                    {"$set": {
+                        "status": "completed",
+                        "progress": 100,
+                        "final_video_url": status.get("video_url"),
+                        "generation_completed_at": datetime.utcnow().isoformat()
+                    }}
+                )
+                logger.info(f"Video generation completed for {video_id}")
+                break
+                
+            elif status["status"] == "FAILED":
+                # Generation failed
+                await db.videos.update_one(
+                    {"id": video_id},
+                    {"$set": {
+                        "status": "error",
+                        "error_message": status.get("error", "Video generation failed"),
+                        "generation_failed_at": datetime.utcnow().isoformat()
+                    }}
+                )
+                logger.error(f"Video generation failed for {video_id}: {status.get('error')}")
+                break
+                
+            # Check timeout
+            elapsed = (datetime.utcnow() - start_time).total_seconds()
+            if elapsed > max_wait_time:
+                await db.videos.update_one(
+                    {"id": video_id},
+                    {"$set": {
+                        "status": "error",
+                        "error_message": "Video generation timeout",
+                        "generation_failed_at": datetime.utcnow().isoformat()
+                    }}
+                )
+                logger.error(f"Video generation timeout for {video_id}")
+                break
+            
+            # Wait before next check
+            await asyncio.sleep(poll_interval)
+        
+    except VideoGenerationError as e:
+        logger.error(f"Video generation service error for {video_id}: {str(e)}")
         await db.videos.update_one(
             {"id": video_id},
-            {"$set": {"status": "error", "error_message": str(e)}}
+            {"$set": {
+                "status": "error", 
+                "error_message": f"Generation service error: {str(e)}",
+                "generation_failed_at": datetime.utcnow().isoformat()
+            }}
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in video generation {video_id}: {str(e)}")
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {
+                "status": "error",
+                "error_message": f"Unexpected error: {str(e)}",
+                "generation_failed_at": datetime.utcnow().isoformat()
+            }}
         )
 
 @api_router.get("/user-videos")
