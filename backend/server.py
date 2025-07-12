@@ -495,6 +495,49 @@ async def get_user_videos():
     videos = await db.videos.find().to_list(100)
     return [VideoStatus(**video) for video in videos]
 
+@api_router.get("/generation-status/{generation_id}")
+async def get_generation_status(generation_id: str):
+    """Get detailed status of a video generation"""
+    try:
+        status = await video_generation_service.get_generation_status(generation_id)
+        return status
+    except Exception as e:
+        logger.error(f"Error getting generation status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/cancel-generation/{generation_id}")
+async def cancel_generation(generation_id: str):
+    """Cancel an ongoing video generation"""
+    try:
+        result = await video_generation_service.cancel_generation(generation_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error cancelling generation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/model-recommendations/{video_id}")
+async def get_model_recommendations(video_id: str):
+    """Get AI model recommendations for a video"""
+    try:
+        # Get video data
+        video = await db.videos.find_one({"id": video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Analyze requirements and get recommendations
+        requirements = model_selector.analyze_video_requirements(
+            video.get("analysis", {}),
+            video.get("plan", {})
+        )
+        
+        recommendations = model_selector.get_model_recommendations(requirements)
+        
+        return recommendations
+        
+    except Exception as e:
+        logger.error(f"Error getting model recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @api_router.get("/")
 async def root():
     return {"message": "Video Generation API is running"}
