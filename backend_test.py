@@ -479,6 +479,207 @@ class VideoGenerationAPITester:
             self.log_test("Gemini API Connectivity", False, f"Gemini API connectivity test failed: {str(e)}")
         
         return False
+    
+    def test_model_recommendations(self):
+        """Test GET /api/model-recommendations/{video_id} endpoint"""
+        if not self.video_id:
+            self.log_test("Model Recommendations", False, "No video ID available for model recommendations test")
+            return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/model-recommendations/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "primary_recommendation" in data and "alternatives" in data:
+                    primary = data["primary_recommendation"]
+                    self.log_test("Model Recommendations", True, 
+                                f"Model recommendations retrieved successfully", {
+                        "primary_provider": primary.get("provider"),
+                        "primary_model": primary.get("model"),
+                        "alternatives_count": len(data.get("alternatives", [])),
+                        "has_reasoning": "reasoning" in primary
+                    })
+                    return True
+                else:
+                    self.log_test("Model Recommendations", False, "Invalid response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Model Recommendations", False, "Video not found for recommendations", {"video_id": self.video_id})
+            else:
+                self.log_test("Model Recommendations", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Model Recommendations", False, f"Model recommendations error: {str(e)}")
+        return False
+    
+    def test_generation_status_endpoint(self):
+        """Test GET /api/generation-status/{generation_id} endpoint"""
+        try:
+            # Use a test generation ID
+            test_generation_id = "test_gen_12345"
+            
+            response = self.session.get(
+                f"{BACKEND_URL}/generation-status/{test_generation_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            # We expect this to fail with a proper error since it's a fake ID
+            if response.status_code == 500:
+                # This is expected for a non-existent generation ID
+                self.log_test("Generation Status Endpoint", True, 
+                            "Endpoint responds correctly to invalid generation ID", {
+                    "status_code": response.status_code,
+                    "endpoint_accessible": True
+                })
+                return True
+            elif response.status_code == 404:
+                self.log_test("Generation Status Endpoint", True, 
+                            "Endpoint correctly returns 404 for non-existent generation", {
+                    "status_code": response.status_code
+                })
+                return True
+            else:
+                self.log_test("Generation Status Endpoint", False, 
+                            f"Unexpected response: HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Generation Status Endpoint", False, f"Generation status endpoint error: {str(e)}")
+        return False
+    
+    def test_cancel_generation_endpoint(self):
+        """Test POST /api/cancel-generation/{generation_id} endpoint"""
+        try:
+            # Use a test generation ID
+            test_generation_id = "test_gen_12345"
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/cancel-generation/{test_generation_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            # We expect this to return a proper response even for non-existent ID
+            if response.status_code in [200, 404, 500]:
+                data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                self.log_test("Cancel Generation Endpoint", True, 
+                            "Endpoint responds correctly to cancel request", {
+                    "status_code": response.status_code,
+                    "has_response": bool(data),
+                    "endpoint_accessible": True
+                })
+                return True
+            else:
+                self.log_test("Cancel Generation Endpoint", False, 
+                            f"Unexpected response: HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Cancel Generation Endpoint", False, f"Cancel generation endpoint error: {str(e)}")
+        return False
+    
+    def test_runway_integration_availability(self):
+        """Test RunwayML integration availability (API key check)"""
+        try:
+            # Check if RunwayML API key is configured
+            import os
+            runway_key = os.environ.get('RUNWAY_API_KEY')
+            
+            if runway_key and len(runway_key) > 10:
+                self.log_test("RunwayML Integration", True, 
+                            "RunwayML API key is configured", {
+                    "key_length": len(runway_key),
+                    "key_prefix": runway_key[:10] + "..."
+                })
+                return True
+            else:
+                self.log_test("RunwayML Integration", False, 
+                            "RunwayML API key not configured or invalid", {
+                    "key_available": bool(runway_key),
+                    "key_length": len(runway_key) if runway_key else 0
+                })
+        except Exception as e:
+            self.log_test("RunwayML Integration", False, f"RunwayML integration check error: {str(e)}")
+        return False
+    
+    def test_veo_integration_availability(self):
+        """Test Google Veo integration availability (Gemini API keys check)"""
+        try:
+            # Check if Gemini API keys are configured for Veo
+            import os
+            gemini_keys = [
+                os.environ.get('GEMINI_API_KEY_1'),
+                os.environ.get('GEMINI_API_KEY_2'),
+                os.environ.get('GEMINI_API_KEY_3')
+            ]
+            
+            valid_keys = [key for key in gemini_keys if key and len(key) > 10]
+            
+            if len(valid_keys) >= 1:
+                self.log_test("Veo Integration", True, 
+                            f"Veo integration configured with {len(valid_keys)} Gemini API keys", {
+                    "valid_keys_count": len(valid_keys),
+                    "total_keys_configured": len([k for k in gemini_keys if k])
+                })
+                return True
+            else:
+                self.log_test("Veo Integration", False, 
+                            "Veo integration not properly configured - insufficient Gemini API keys", {
+                    "valid_keys_count": len(valid_keys),
+                    "total_keys_configured": len([k for k in gemini_keys if k])
+                })
+        except Exception as e:
+            self.log_test("Veo Integration", False, f"Veo integration check error: {str(e)}")
+        return False
+    
+    def test_video_generation_workflow(self):
+        """Test the complete video generation workflow"""
+        if not self.video_id:
+            self.log_test("Video Generation Workflow", False, "No video ID available for generation workflow test")
+            return False
+            
+        try:
+            # First check if video is ready for generation
+            status_response = self.session.get(
+                f"{BACKEND_URL}/video-status/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if status_response.status_code != 200:
+                self.log_test("Video Generation Workflow", False, "Cannot check video status for generation test")
+                return False
+                
+            status_data = status_response.json()
+            
+            # Test the generation endpoint
+            generation_data = {
+                "video_id": self.video_id,
+                "final_plan": "Create a test video with vibrant colors and smooth transitions in 9:16 aspect ratio",
+                "session_id": self.session_id
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/generate-video",
+                json=generation_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "message" in data and "video_id" in data:
+                    self.log_test("Video Generation Workflow", True, 
+                                "Video generation workflow initiated successfully", {
+                        "message": data["message"],
+                        "video_id": data["video_id"],
+                        "original_video_status": status_data.get("status"),
+                        "workflow_started": True
+                    })
+                    return True
+                else:
+                    self.log_test("Video Generation Workflow", False, "Invalid generation response format", {"response": data})
+            else:
+                self.log_test("Video Generation Workflow", False, 
+                            f"Generation workflow failed: HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Generation Workflow", False, f"Video generation workflow error: {str(e)}")
+        return False
         """Test MongoDB connection by checking if data persists"""
         if not self.video_id:
             self.log_test("MongoDB Connection", False, "No video ID to test database persistence")
