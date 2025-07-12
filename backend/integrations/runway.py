@@ -57,6 +57,9 @@ class RunwayMLClient:
         Returns:
             Dict containing task_id and initial status
         """
+        # Check API key availability
+        self._check_api_key()
+        
         try:
             # Determine the endpoint based on model
             if model == "gen4":
