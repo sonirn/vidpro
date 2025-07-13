@@ -627,33 +627,39 @@ class VideoGenerationAPITester:
         return False
     
     def test_veo_integration_availability(self):
-        """Test Google Veo integration availability (Gemini API keys check)"""
+        """Test Google Veo integration availability and API connectivity"""
         try:
-            # Check if Gemini API keys are configured for Veo
+            # Test the actual Veo integration
+            import sys
             import os
-            gemini_keys = [
-                os.environ.get('GEMINI_API_KEY_1'),
-                os.environ.get('GEMINI_API_KEY_2'),
-                os.environ.get('GEMINI_API_KEY_3')
-            ]
+            sys.path.append('/app/backend')
             
-            valid_keys = [key for key in gemini_keys if key and len(key) > 10]
+            from integrations.veo import veo_client
+            
+            # Check if Gemini API keys are configured for Veo
+            if not veo_client.api_keys or veo_client.api_keys == ["dummy_key"]:
+                self.log_test("Veo Integration", False, 
+                            "Veo integration not properly configured - no valid Gemini API keys")
+                return False
+            
+            valid_keys = [key for key in veo_client.api_keys if key and len(key) > 10]
             
             if len(valid_keys) >= 1:
                 self.log_test("Veo Integration", True, 
-                            f"Veo integration configured with {len(valid_keys)} Gemini API keys", {
+                            f"Veo integration properly configured with {len(valid_keys)} Gemini API keys", {
                     "valid_keys_count": len(valid_keys),
-                    "total_keys_configured": len([k for k in gemini_keys if k])
+                    "total_keys_configured": len(veo_client.api_keys),
+                    "current_key_index": veo_client.current_key_index
                 })
                 return True
             else:
                 self.log_test("Veo Integration", False, 
-                            "Veo integration not properly configured - insufficient Gemini API keys", {
+                            "Veo integration not properly configured - insufficient valid Gemini API keys", {
                     "valid_keys_count": len(valid_keys),
-                    "total_keys_configured": len([k for k in gemini_keys if k])
+                    "total_keys_configured": len(veo_client.api_keys)
                 })
         except Exception as e:
-            self.log_test("Veo Integration", False, f"Veo integration check error: {str(e)}")
+            self.log_test("Veo Integration", False, f"Veo integration test error: {str(e)}")
         return False
     
     def test_video_generation_workflow(self):
