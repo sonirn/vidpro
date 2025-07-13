@@ -21,6 +21,10 @@ import random
 # Import our video generation services
 from services.video_generator import video_generation_service, VideoGenerationError
 from services.model_selector import model_selector
+# Import storage and processing services
+from services.storage import storage_manager
+from services.video_processor import video_processor
+from services.audio_generator import audio_generator
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
