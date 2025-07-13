@@ -662,7 +662,104 @@ class VideoGenerationAPITester:
             self.log_test("Veo Integration", False, f"Veo integration test error: {str(e)}")
         return False
     
-    def test_video_generation_workflow(self):
+    def test_runway_video_generation_api(self):
+        """Test RunwayML video generation API integration"""
+        try:
+            import sys
+            sys.path.append('/app/backend')
+            
+            from integrations.runway import runway_client
+            
+            # Check if API key is available
+            if not runway_client.api_key or len(runway_client.api_key) < 10:
+                self.log_test("RunwayML Video Generation API", False, 
+                            "RunwayML API key not configured - cannot test generation")
+                return False
+            
+            # Test prompt generation (without actually calling the API to avoid costs)
+            test_prompt = "A beautiful sunset over mountains with flowing water, cinematic quality, 9:16 aspect ratio"
+            
+            # Test model selection
+            best_model = runway_client.select_best_model("text_to_video", 5)
+            
+            # Verify client methods exist and are callable
+            methods_to_check = ['generate_video', 'get_task_status', 'wait_for_completion', 'generate_with_retry']
+            missing_methods = []
+            
+            for method in methods_to_check:
+                if not hasattr(runway_client, method) or not callable(getattr(runway_client, method)):
+                    missing_methods.append(method)
+            
+            if missing_methods:
+                self.log_test("RunwayML Video Generation API", False, 
+                            f"Missing required methods: {missing_methods}")
+                return False
+            
+            self.log_test("RunwayML Video Generation API", True, 
+                        "RunwayML video generation API integration ready", {
+                "api_key_configured": True,
+                "selected_model": best_model,
+                "test_prompt_length": len(test_prompt),
+                "available_methods": methods_to_check,
+                "base_url": runway_client.base_url
+            })
+            return True
+            
+        except Exception as e:
+            self.log_test("RunwayML Video Generation API", False, 
+                        f"RunwayML video generation API test error: {str(e)}")
+        return False
+    
+    def test_veo_video_generation_api(self):
+        """Test Google Veo video generation API integration"""
+        try:
+            import sys
+            sys.path.append('/app/backend')
+            
+            from integrations.veo import veo_client
+            
+            # Check if API keys are available
+            if not veo_client.api_keys or veo_client.api_keys == ["dummy_key"]:
+                self.log_test("Veo Video Generation API", False, 
+                            "Veo integration not configured - no valid Gemini API keys")
+                return False
+            
+            # Test model selection
+            test_analysis = {
+                "visual_analysis": "Complex scene with multiple characters and realistic lighting",
+                "complexity": "high",
+                "technical_aspects": "Professional cinematography with advanced effects"
+            }
+            
+            best_model = veo_client.select_best_veo_model(test_analysis)
+            
+            # Verify client methods exist and are callable
+            methods_to_check = ['generate_video_veo2', 'generate_video_veo3', 'generate_video_auto', 
+                              'get_generation_status', 'enhance_prompt_for_veo']
+            missing_methods = []
+            
+            for method in methods_to_check:
+                if not hasattr(veo_client, method) or not callable(getattr(veo_client, method)):
+                    missing_methods.append(method)
+            
+            if missing_methods:
+                self.log_test("Veo Video Generation API", False, 
+                            f"Missing required methods: {missing_methods}")
+                return False
+            
+            self.log_test("Veo Video Generation API", True, 
+                        "Veo video generation API integration ready", {
+                "api_keys_configured": len(veo_client.api_keys),
+                "selected_model": best_model,
+                "available_methods": methods_to_check,
+                "current_key_index": veo_client.current_key_index
+            })
+            return True
+            
+        except Exception as e:
+            self.log_test("Veo Video Generation API", False, 
+                        f"Veo video generation API test error: {str(e)}")
+        return False
         """Test the complete video generation workflow"""
         if not self.video_id:
             self.log_test("Video Generation Workflow", False, "No video ID available for generation workflow test")
