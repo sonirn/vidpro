@@ -542,6 +542,329 @@ async def get_model_recommendations(video_id: str):
         logger.error(f"Error getting model recommendations: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# === PHASE 3: STORAGE & PROCESSING ENDPOINTS ===
+
+@api_router.post("/storage/upload-generated-video")
+async def upload_generated_video(video_id: str, generation_id: str, file: UploadFile = File(...)):
+    """Upload a generated video to R2 storage"""
+    try:
+        # Validate file type
+        if not file.content_type.startswith('video/'):
+            raise HTTPException(status_code=400, detail="File must be a video")
+        
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        try:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file.close()
+            
+            # Generate storage key
+            storage_key = storage_manager.generate_video_key(video_id, generation_id)
+            
+            # Upload to R2
+            upload_result = await storage_manager.upload_file(
+                temp_file.name, 
+                storage_key,
+                metadata={
+                    'video_id': video_id,
+                    'generation_id': generation_id,
+                    'original_filename': file.filename
+                }
+            )
+            
+            if upload_result['success']:
+                # Update video record with storage info
+                await db.videos.update_one(
+                    {"id": video_id},
+                    {"$set": {
+                        "storage_key": storage_key,
+                        "storage_bucket": upload_result['bucket'],
+                        "file_size": upload_result['file_size'],
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
+                    }}
+                )
+                
+                # Generate download URL
+                download_url = storage_manager.generate_presigned_url(storage_key, expiration=86400)  # 24 hours
+                
+                return {
+                    "success": True,
+                    "storage_key": storage_key,
+                    "download_url": download_url,
+                    "file_size": upload_result['file_size'],
+                    "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
+                }
+            else:
+                raise HTTPException(status_code=500, detail=f"Upload failed: {upload_result['error']}")
+                
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
+        
+    except Exception as e:
+        logger.error(f"Error uploading generated video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/storage/download-url/{video_id}")
+async def get_download_url(video_id: str):
+    """Get a presigned download URL for a video"""
+    try:
+        # Get video data
+        video = await db.videos.find_one({"id": video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        storage_key = video.get("storage_key")
+        if not storage_key:
+            raise HTTPException(status_code=404, detail="Video file not found in storage")
+        
+        # Check if video has expired
+        expires_at = video.get("expires_at")
+        if expires_at:
+            expiry_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            if datetime.utcnow() > expiry_date.replace(tzinfo=None):
+                raise HTTPException(status_code=410, detail="Video has expired")
+        
+        # Generate download URL
+        download_url = storage_manager.generate_presigned_url(storage_key, expiration=3600)  # 1 hour
+        
+        if download_url:
+            return {
+                "success": True,
+                "download_url": download_url,
+                "video_id": video_id,
+                "expires_in": 3600,
+                "file_size": video.get("file_size", 0)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Could not generate download URL")
+            
+    except Exception as e:
+        logger.error(f"Error generating download URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/processing/convert-to-vertical/{video_id}")
+async def convert_video_to_vertical(video_id: str, background_tasks: BackgroundTasks):
+    """Convert a video to 9:16 vertical format"""
+    try:
+        # Get video data
+        video = await db.videos.find_one({"id": video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        file_path = video.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Video file not found")
+        
+        # Start background processing
+        background_tasks.add_task(process_video_conversion, video_id, file_path)
+        
+        # Update status
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {
+                "processing_status": "converting_to_vertical",
+                "processing_started_at": datetime.utcnow().isoformat()
+            }}
+        )
+        
+        return {
+            "success": True,
+            "video_id": video_id,
+            "status": "conversion_started",
+            "message": "Video conversion to 9:16 format started"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting video conversion: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/processing/video-info/{video_id}")
+async def get_video_processing_info(video_id: str):
+    """Get detailed video processing information"""
+    try:
+        # Get video data
+        video = await db.videos.find_one({"id": video_id})
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        file_path = video.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Video file not found")
+        
+        # Get video info using FFmpeg
+        video_info = await video_processor.get_video_info(file_path)
+        
+        if video_info:
+            return {
+                "success": True,
+                "video_id": video_id,
+                "video_info": video_info
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Could not analyze video")
+            
+    except Exception as e:
+        logger.error(f"Error getting video info: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/audio/generate-speech")
+async def generate_speech_audio(text: str, voice_id: Optional[str] = None):
+    """Generate speech audio using ElevenLabs"""
+    try:
+        if not audio_generator.enabled:
+            raise HTTPException(status_code=503, detail="Audio generation service not available")
+        
+        # Generate speech
+        result = await audio_generator.generate_speech(text, voice_id)
+        
+        if result['success']:
+            # Upload to R2 storage
+            audio_id = uuid.uuid4().hex
+            storage_key = f"audio/{audio_id}.mp3"
+            
+            upload_result = await storage_manager.upload_file(
+                result['audio_path'],
+                storage_key,
+                metadata={
+                    'type': 'generated_speech',
+                    'voice_id': result['voice_id'],
+                    'text_length': str(result['text_length'])
+                }
+            )
+            
+            if upload_result['success']:
+                # Generate download URL
+                download_url = storage_manager.generate_presigned_url(storage_key, expiration=3600)
+                
+                return {
+                    "success": True,
+                    "audio_id": audio_id,
+                    "storage_key": storage_key,
+                    "download_url": download_url,
+                    "voice_id": result['voice_id'],
+                    "file_size": result['file_size']
+                }
+            else:
+                raise HTTPException(status_code=500, detail=f"Upload failed: {upload_result['error']}")
+        else:
+            raise HTTPException(status_code=500, detail=f"Speech generation failed: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error generating speech: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/audio/voices")
+async def get_available_voices():
+    """Get list of available ElevenLabs voices"""
+    try:
+        if not audio_generator.enabled:
+            raise HTTPException(status_code=503, detail="Audio generation service not available")
+        
+        voices_result = await audio_generator.get_available_voices()
+        
+        if voices_result['success']:
+            return voices_result
+        else:
+            raise HTTPException(status_code=500, detail=f"Could not fetch voices: {voices_result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error fetching voices: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/storage/cleanup-expired")
+async def cleanup_expired_files():
+    """Clean up files that have exceeded their 7-day expiration"""
+    try:
+        cleanup_result = await storage_manager.cleanup_expired_files()
+        
+        if cleanup_result['success']:
+            # Also clean up database records for expired videos
+            current_time = datetime.utcnow()
+            expired_videos = await db.videos.find({
+                "expires_at": {"$lt": current_time.isoformat()}
+            }).to_list(None)
+            
+            for video in expired_videos:
+                await db.videos.update_one(
+                    {"id": video["id"]},
+                    {"$set": {"status": "expired", "file_expired": True}}
+                )
+            
+            return {
+                "success": True,
+                "storage_cleanup": cleanup_result,
+                "database_records_updated": len(expired_videos)
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Cleanup failed: {cleanup_result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Background task for video processing
+async def process_video_conversion(video_id: str, input_path: str):
+    """Background task to convert video to vertical format"""
+    try:
+        logger.info(f"Starting video conversion for {video_id}")
+        
+        # Generate output path
+        output_path = input_path.replace('.mp4', '_vertical.mp4')
+        
+        # Convert to vertical
+        result = await video_processor.convert_to_vertical(input_path, output_path)
+        
+        if result['success']:
+            # Upload converted video to R2
+            storage_key = storage_manager.generate_video_key(video_id, "converted")
+            upload_result = await storage_manager.upload_file(
+                output_path,
+                storage_key,
+                metadata={
+                    'video_id': video_id,
+                    'type': 'converted_vertical',
+                    'original_file': input_path
+                }
+            )
+            
+            if upload_result['success']:
+                # Update video record
+                await db.videos.update_one(
+                    {"id": video_id},
+                    {"$set": {
+                        "processing_status": "conversion_completed",
+                        "converted_storage_key": storage_key,
+                        "converted_file_size": upload_result['file_size'],
+                        "processing_completed_at": datetime.utcnow().isoformat()
+                    }}
+                )
+                logger.info(f"Video conversion completed for {video_id}")
+            else:
+                raise Exception(f"Upload failed: {upload_result['error']}")
+        else:
+            raise Exception(f"Conversion failed: {result['error']}")
+            
+        # Clean up local files
+        if os.path.exists(output_path):
+            os.remove(output_path)
+            
+    except Exception as e:
+        logger.error(f"Video conversion failed for {video_id}: {str(e)}")
+        
+        # Update video record with error
+        await db.videos.update_one(
+            {"id": video_id},
+            {"$set": {
+                "processing_status": "conversion_failed",
+                "processing_error": str(e),
+                "processing_failed_at": datetime.utcnow().isoformat()
+            }}
+        )
+
 @api_router.get("/")
 async def root():
     return {"message": "Video Generation API is running"}
