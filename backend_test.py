@@ -760,6 +760,65 @@ class VideoGenerationAPITester:
             self.log_test("Veo Video Generation API", False, 
                         f"Veo video generation API test error: {str(e)}")
         return False
+    
+    def test_video_generation_service_orchestrator(self):
+        """Test the video generation service orchestrator"""
+        try:
+            import sys
+            sys.path.append('/app/backend')
+            
+            from services.video_generator import video_generation_service
+            
+            # Test service initialization
+            if not hasattr(video_generation_service, 'active_generations'):
+                self.log_test("Video Generation Service", False, 
+                            "Video generation service not properly initialized")
+                return False
+            
+            # Verify service methods exist and are callable
+            methods_to_check = ['generate_video', 'get_generation_status', 'cancel_generation', 
+                              'get_all_generations', 'cleanup_completed_generations']
+            missing_methods = []
+            
+            for method in methods_to_check:
+                if not hasattr(video_generation_service, method) or not callable(getattr(video_generation_service, method)):
+                    missing_methods.append(method)
+            
+            if missing_methods:
+                self.log_test("Video Generation Service", False, 
+                            f"Missing required methods: {missing_methods}")
+                return False
+            
+            # Test prompt extraction method
+            test_plan = {"prompt": "Test video generation prompt", "description": "Test description"}
+            test_analysis = {"visual_analysis": "Test visual analysis"}
+            
+            try:
+                prompt = video_generation_service._extract_generation_prompt(test_plan, test_analysis)
+                if not prompt or len(prompt) < 10:
+                    self.log_test("Video Generation Service", False, 
+                                "Prompt extraction not working properly")
+                    return False
+            except Exception as e:
+                self.log_test("Video Generation Service", False, 
+                            f"Prompt extraction failed: {str(e)}")
+                return False
+            
+            self.log_test("Video Generation Service", True, 
+                        "Video generation service orchestrator ready", {
+                "available_methods": methods_to_check,
+                "active_generations_count": len(video_generation_service.active_generations),
+                "prompt_extraction_working": True,
+                "extracted_prompt_length": len(prompt)
+            })
+            return True
+            
+        except Exception as e:
+            self.log_test("Video Generation Service", False, 
+                        f"Video generation service test error: {str(e)}")
+        return False
+    
+    def test_video_generation_workflow(self):
         """Test the complete video generation workflow"""
         if not self.video_id:
             self.log_test("Video Generation Workflow", False, "No video ID available for generation workflow test")
