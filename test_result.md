@@ -221,7 +221,7 @@ backend:
 
   - task: "RunwayML video generation integration"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/integrations/runway.py"
     stuck_count: 0
     priority: "high"
@@ -233,6 +233,9 @@ backend:
       - working: false
         agent: "testing"
         comment: "❌ TESTED: RunwayML integration code is well-implemented but missing RUNWAY_API_KEY environment variable. The integration classes, error handling, retry logic, and API endpoints are correctly structured. Will work once API key is configured."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: RunwayML integration now fully functional with configured API key. All integration methods available (generate_video, get_task_status, wait_for_completion, generate_with_retry). Model selection working correctly. API connectivity confirmed. Ready for production video generation."
 
   - task: "Google Veo 2/3 video generation integration"
     implemented: true
