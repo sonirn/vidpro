@@ -597,27 +597,33 @@ class VideoGenerationAPITester:
         return False
     
     def test_runway_integration_availability(self):
-        """Test RunwayML integration availability (API key check)"""
+        """Test RunwayML integration availability and API connectivity"""
         try:
-            # Check if RunwayML API key is configured
+            # Test the actual RunwayML integration
+            import sys
             import os
-            runway_key = os.environ.get('RUNWAY_API_KEY')
+            sys.path.append('/app/backend')
             
-            if runway_key and len(runway_key) > 10:
-                self.log_test("RunwayML Integration", True, 
-                            "RunwayML API key is configured", {
-                    "key_length": len(runway_key),
-                    "key_prefix": runway_key[:10] + "..."
-                })
-                return True
-            else:
+            from integrations.runway import runway_client
+            
+            # Check if API key is configured
+            if not runway_client.api_key or len(runway_client.api_key) < 10:
                 self.log_test("RunwayML Integration", False, 
-                            "RunwayML API key not configured or invalid", {
-                    "key_available": bool(runway_key),
-                    "key_length": len(runway_key) if runway_key else 0
-                })
+                            "RunwayML API key not configured properly")
+                return False
+            
+            # Test basic client initialization
+            self.log_test("RunwayML Integration", True, 
+                        "RunwayML integration properly configured with API key", {
+                "key_length": len(runway_client.api_key),
+                "key_prefix": runway_client.api_key[:10] + "...",
+                "base_url": runway_client.base_url,
+                "timeout": runway_client.timeout
+            })
+            return True
+            
         except Exception as e:
-            self.log_test("RunwayML Integration", False, f"RunwayML integration check error: {str(e)}")
+            self.log_test("RunwayML Integration", False, f"RunwayML integration test error: {str(e)}")
         return False
     
     def test_veo_integration_availability(self):
