@@ -354,9 +354,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "RunwayML video generation integration"
-    - "Google Veo 2/3 video generation integration"
-    - "AI model selection service"
+    - "Video upload API with chunked file handling"
     - "Video generation orchestration service"
   stuck_tasks: []
   test_all: false
