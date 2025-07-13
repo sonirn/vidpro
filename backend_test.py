@@ -12,6 +12,12 @@ import tempfile
 import uuid
 from pathlib import Path
 
+# Load environment variables from backend
+import sys
+sys.path.append('/app/backend')
+from dotenv import load_dotenv
+load_dotenv('/app/backend/.env')
+
 # Configuration
 BACKEND_URL = "https://293971f2-ef4d-4284-898a-f962c4aa37d2.preview.emergentagent.com/api"
 TEST_TIMEOUT = 30
