@@ -71,19 +71,19 @@ const VideoUpload = ({ onUploadSuccess }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl p-8 max-w-2xl mx-auto">
-      <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">Upload Your Sample Video</h2>
+    <div className="bg-black/30 backdrop-blur-xl rounded-3xl shadow-2xl p-8 max-w-2xl mx-auto border border-white/10">
+      <h2 className="text-3xl font-bold text-white mb-6 text-center">Upload Your Sample Video</h2>
       
       <div 
         className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${
-          dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+          dragOver ? 'border-purple-400 bg-purple-500/20' : 'border-white/30 hover:border-white/50'
         }`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
       >
         <div className="space-y-4">
-          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center">
             <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
@@ -91,13 +91,13 @@ const VideoUpload = ({ onUploadSuccess }) => {
           
           {file ? (
             <div className="text-center">
-              <p className="text-lg font-semibold text-gray-700">{file.name}</p>
-              <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p className="text-lg font-semibold text-white">{file.name}</p>
+              <p className="text-sm text-gray-300">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
             </div>
           ) : (
             <div>
-              <p className="text-xl font-semibold text-gray-700 mb-2">Drop your video here</p>
-              <p className="text-gray-500 mb-4">or click to browse</p>
+              <p className="text-xl font-semibold text-white mb-2">Drop your video here</p>
+              <p className="text-gray-300 mb-4">or click to browse</p>
               <p className="text-sm text-gray-400">Supports MP4, MOV, AVI • Max 60 seconds</p>
             </div>
           )}
@@ -111,7 +111,7 @@ const VideoUpload = ({ onUploadSuccess }) => {
           />
           <label
             htmlFor="video-upload"
-            className="inline-block bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold cursor-pointer hover:from-blue-600 hover:to-purple-700 transition-all duration-200"
+            className="inline-block bg-gradient-to-r from-purple-500 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold cursor-pointer hover:from-purple-600 hover:to-blue-700 transition-all duration-200"
           >
             Choose Video
           </label>
