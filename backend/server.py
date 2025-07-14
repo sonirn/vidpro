@@ -42,6 +42,9 @@ logger = logging.getLogger(__name__)
 # Initialize database
 initialize_database()
 
+# Start background worker
+start_background_worker()
+
 # Create the main app
 app = FastAPI(title="Video Generation API", version="1.0.0")
 
