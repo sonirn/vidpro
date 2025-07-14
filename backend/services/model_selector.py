@@ -413,9 +413,15 @@ class ModelSelector:
             if "runway" in model_name:
                 alt_provider = "runway"
                 alt_model = model_name.split("_")[1]
-            else:
+            elif "veo" in model_name:
                 alt_provider = "veo"
                 alt_model = model_name.replace("_", "-")
+            elif "wan21" in model_name:
+                alt_provider = "wan21"
+                alt_model = model_name.replace("wan21_", "").replace("_", "-")
+            else:
+                alt_provider = "unknown"
+                alt_model = model_name
             
             alternatives.append({
                 "provider": alt_provider,
