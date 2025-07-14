@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import AuthComponent from './components/AuthComponent';
+import UserDashboard from './components/UserDashboard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -10,6 +13,7 @@ const VideoUpload = ({ onUploadSuccess }) => {
   const [userPrompt, setUserPrompt] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const { getAuthHeaders } = useAuth();
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -44,7 +48,7 @@ const VideoUpload = ({ onUploadSuccess }) => {
     const formData = new FormData();
     formData.append('file', file);
     if (userPrompt) {
-      formData.append('user_prompt', userPrompt);
+      formData.append('context', userPrompt);
     }
 
     try {
