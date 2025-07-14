@@ -807,6 +807,7 @@ class HybridSystemTester:
             ("Create Confirmed User", self.create_confirmed_test_user),
             ("User Signup", self.test_user_signup),
             ("User Signin", self.test_user_signin),
+            ("Confirmed User Signin", self.test_confirmed_user_signin),
             ("User Info", self.test_user_info),
             ("Video Upload (New)", self.test_video_upload_new),
             ("Video Upload (Legacy)", self.test_video_upload),
