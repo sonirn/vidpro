@@ -18,6 +18,9 @@ import shutil
 from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
 import random
 
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 # Import our video generation services
 from services.video_generator import video_generation_service, VideoGenerationError
 from services.model_selector import model_selector
@@ -32,9 +35,6 @@ from services.auth_service import (
     auth_service, get_current_user, get_current_user_optional, auth_middleware,
     SignupRequest, LoginRequest, AuthResponse, UserResponse, AuthUser
 )
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 # Create the main app without a prefix
 app = FastAPI(title="Video Generation API", version="1.0.0")
