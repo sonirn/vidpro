@@ -76,6 +76,17 @@ class VideoGenerationRequest(BaseModel):
     video_id: str
     model_preference: Optional[str] = "auto"  # "t2v-1.3b", "i2v-14b", "flf2v-14b", "auto"
 
+class SignUpRequest(BaseModel):
+    email: str
+    password: str
+
+class SignInRequest(BaseModel):
+    email: str
+    password: str
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
 # Health check endpoint
 @api_router.get("/health")
 async def health_check():
