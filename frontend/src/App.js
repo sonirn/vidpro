@@ -338,15 +338,37 @@ const ChatInterface = ({ videoId, currentPlan, onPlanUpdate }) => {
   );
 };
 
-const App = () => {
+const MainApp = () => {
   const [currentStep, setCurrentStep] = useState('upload'); // 'upload', 'processing', 'chat', 'generate'
   const [videoId, setVideoId] = useState(null);
   const [videoStatus, setVideoStatus] = useState(null);
   const [currentPlan, setCurrentPlan] = useState('');
+  const [showDashboard, setShowDashboard] = useState(false);
+  const { getAuthHeaders } = useAuth();
 
   const handleUploadSuccess = (uploadData) => {
-    setVideoId(uploadData.id);
+    setVideoId(uploadData.video_id);
     setCurrentStep('processing');
+    setShowDashboard(false);
+    
+    // Start analysis automatically
+    setTimeout(() => {
+      startVideoAnalysis(uploadData.video_id);
+    }, 1000);
+  };
+
+  const startVideoAnalysis = async (videoId) => {
+    try {
+      await axios.post(`${API}/analyze/${videoId}`, {
+        video_id: videoId,
+        user_prompt: ''
+      }, {
+        headers: getAuthHeaders()
+      });
+    } catch (error) {
+      console.error('Error starting video analysis:', error);
+      alert('Failed to start video analysis. Please try again.');
+    }
   };
 
   const handleStatusChange = (status) => {
@@ -354,7 +376,7 @@ const App = () => {
     if (status.plan) {
       setCurrentPlan(status.plan);
     }
-    if (status.status === 'analyzed') {
+    if (status.status === 'planned') {
       setCurrentStep('chat');
     }
   };
@@ -369,6 +391,8 @@ const App = () => {
         video_id: videoId,
         final_plan: currentPlan,
         session_id: `session_${Date.now()}`
+      }, {
+        headers: getAuthHeaders()
       });
       setCurrentStep('processing');
     } catch (error) {
@@ -382,18 +406,41 @@ const App = () => {
     setVideoId(null);
     setVideoStatus(null);
     setCurrentPlan('');
+    setShowDashboard(false);
   };
 
+  const showUserDashboard = () => {
+    setShowDashboard(true);
+  };
+
+  const startNewProject = () => {
+    setShowDashboard(false);
+    resetApp();
+  };
+
+  if (showDashboard) {
+    return <UserDashboard onStartNewProject={startNewProject} />;
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       <div className="container mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
-            AI Video Generator
-          </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Upload your sample video and let AI create a similar masterpiece in 9:16 format
-          </p>
+        {/* Header with Dashboard Button */}
+        <div className="flex justify-between items-center mb-8">
+          <div className="text-center flex-1">
+            <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent mb-4">
+              AI Video Generator
+            </h1>
+            <p className="text-xl text-gray-300 max-w-2xl mx-auto">
+              Upload your sample video and let AI create a similar masterpiece in 9:16 format
+            </p>
+          </div>
+          <button
+            onClick={showUserDashboard}
+            className="bg-white/10 hover:bg-white/20 text-white font-medium py-2 px-4 rounded-xl transition-all duration-200 border border-white/20"
+          >
+            Dashboard
+          </button>
         </div>
 
         {currentStep === 'upload' && (
@@ -434,7 +481,7 @@ const App = () => {
           <div className="text-center mt-8">
             <button
               onClick={resetApp}
-              className="text-gray-600 hover:text-gray-800 underline"
+              className="text-gray-300 hover:text-gray-100 underline"
             >
               Start Over
             </button>
@@ -443,6 +490,37 @@ const App = () => {
       </div>
     </div>
   );
+};
+
+const App = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+          <p className="text-white">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <AuthProvider>
+      <AuthenticatedApp />
+    </AuthProvider>
+  );
+};
+
+const AuthenticatedApp = () => {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <AuthComponent />;
+  }
+
+  return <MainApp />;
 };
 
 export default App;
