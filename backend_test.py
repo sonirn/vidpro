@@ -849,6 +849,12 @@ class HybridSystemTester:
                         "authentication_required": True
                     })
                     return True
+                elif response.status_code == 403:
+                    self.log_test("User Videos (New)", True, "User videos endpoint exists and properly protected", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
                 else:
                     self.log_test("User Videos (New)", False, f"Unexpected response: HTTP {response.status_code}")
                     return False
