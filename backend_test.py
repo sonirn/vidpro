@@ -671,6 +671,8 @@ class HybridSystemTester:
         except Exception as e:
             self.log_test("User Videos (New)", False, f"User videos error: {str(e)}")
         return False
+    
+    def test_unauthorized_access(self):
         """Test that endpoints properly reject unauthorized requests"""
         try:
             # Remove authorization header
