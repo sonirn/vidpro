@@ -181,10 +181,10 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-2xl mx-auto">
+      <div className="bg-black/30 backdrop-blur-xl rounded-3xl shadow-2xl p-8 max-w-4xl mx-auto border border-white/10">
         <div className="animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
-          <div className="h-2 bg-gray-200 rounded w-full"></div>
+          <div className="h-4 bg-white/20 rounded w-3/4 mb-4"></div>
+          <div className="h-2 bg-white/20 rounded w-full"></div>
         </div>
       </div>
     );
@@ -194,10 +194,11 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
 
   const getStatusColor = () => {
     switch (status.status) {
-      case 'completed': return 'text-green-600';
-      case 'error': return 'text-red-600';
-      case 'generating': return 'text-blue-600';
-      default: return 'text-yellow-600';
+      case 'completed': return 'text-green-400';
+      case 'error': return 'text-red-400';
+      case 'generating': return 'text-blue-400';
+      case 'planned': return 'text-purple-400';
+      default: return 'text-yellow-400';
     }
   };
 
@@ -206,7 +207,7 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
       case 'uploaded': return 'Video uploaded successfully';
       case 'analyzing': return 'Analyzing your video...';
       case 'planning': return 'Creating video plan...';
-      case 'analyzed': return 'Analysis complete! Review your plan below.';
+      case 'planned': return 'Analysis complete! Review your plan below.';
       case 'generating': return 'Generating your video...';
       case 'completed': return 'Your video is ready!';
       case 'error': return 'An error occurred';
@@ -215,9 +216,9 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl p-8 max-w-4xl mx-auto">
+    <div className="bg-black/30 backdrop-blur-xl rounded-3xl shadow-2xl p-8 max-w-4xl mx-auto border border-white/10">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-2xl font-bold text-gray-800">Video Processing Status</h3>
+        <h3 className="text-2xl font-bold text-white">Video Processing Status</h3>
         <span className={`text-lg font-semibold ${getStatusColor()}`}>
           {getStatusText()}
         </span>
@@ -225,8 +226,8 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
 
       <div className="mb-6">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-sm text-gray-600">Progress</span>
-          <span className="text-sm font-semibold text-gray-800">{status.progress}%</span>
+          <span className="text-sm text-gray-300">Progress</span>
+          <span className="text-sm font-semibold text-white">{status.progress}%</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-3">
           <div 
