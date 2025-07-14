@@ -38,3 +38,4 @@ aiohappyeyeballs
 aiosignal
 frozenlist
 openai
+tiktoken
