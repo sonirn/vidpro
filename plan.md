@@ -46,7 +46,7 @@ huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B --local-dir ./Wan2.1-T2V-1.3B
 |-------|--------|----------|--------------|
 | Phase 1 | ✅ COMPLETE | 100% | Research Wan 2.1 |
 | Phase 2 | ✅ COMPLETE | 100% | Infrastructure Setup |
-| Phase 3 | 🔄 IN PROGRESS | 20% | Video Processing Schema |
+| Phase 3 | 🔄 IN PROGRESS | 30% | Video Processing Schema |
 | Phase 4 | ⏳ NOT STARTED | 0% | Wan 2.1 Integration |
 | Phase 5 | ⏳ NOT STARTED | 0% | Video Pipeline |
 | Phase 6 | ⏳ NOT STARTED | 0% | Frontend Development |
