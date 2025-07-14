@@ -636,7 +636,242 @@ async def generate_video(
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        # Create generation task
+        # Start Wan 2.1 video generation
+        result = await wan21_video_service.generate_video_clips(
+            video_id=request.video_id,
+            plan=video.get("generation_plan", {}),
+            sample_video_path=video.get("sample_video_path", ""),
+            character_image_path=video.get("character_image_path"),
+            audio_path=video.get("audio_file_path")
+        )
+        
+        if result.get("success"):
+            generation_id = str(uuid.uuid4())
+            generation_doc = {
+                "generation_id": generation_id,
+                "video_id": request.video_id,
+                "user_id": current_user.id,
+                "model_preference": request.model_preference,
+                "status": "processing",
+                "model_used": result.get("model_used", ""),
+                "video_path": result.get("video_path"),
+                "clips_generated": result.get("clips_generated", 0),
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            await db.generation_tasks.insert_one(generation_doc)
+            
+            return {
+                "generation_id": generation_id,
+                "video_id": request.video_id,
+                "status": "processing",
+                "message": "Video generation started with Wan 2.1",
+                "model_used": result.get("model_used"),
+                "clips_generated": result.get("clips_generated", 0)
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result.get("error", "Generation failed"))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+
+# Wan 2.1 model recommendations endpoint
+@api_router.get("/wan21/models")
+async def get_wan21_models():
+    """Get available Wan 2.1 models"""
+    try:
+        from integrations.wan21 import wan21_service
+        return {"models": wan21_service.get_available_models()}
+    except Exception as e:
+        logger.error(f"Error getting Wan 2.1 models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get models: {str(e)}")
+
+# Wan 2.1 generation progress endpoint
+@api_router.get("/wan21/generation/{generation_id}/progress")
+async def get_wan21_generation_progress(
+    generation_id: str,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Get Wan 2.1 generation progress"""
+    try:
+        db = get_db()
+        
+        # Get generation task
+        generation_task = await db.generation_tasks.find_one({
+            "generation_id": generation_id,
+            "user_id": current_user.id
+        })
+        
+        if not generation_task:
+            raise HTTPException(status_code=404, detail="Generation task not found")
+        
+        # Get detailed progress from video document
+        video_progress = await wan21_video_service.get_generation_progress(
+            generation_task["video_id"]
+        )
+        
+        return {
+            "generation_id": generation_id,
+            "video_id": generation_task["video_id"],
+            "status": generation_task.get("status", "pending"),
+            "model_used": generation_task.get("model_used", ""),
+            "clips_generated": generation_task.get("clips_generated", 0),
+            "video_path": generation_task.get("video_path"),
+            "detailed_progress": video_progress,
+            "created_at": generation_task.get("created_at"),
+            "updated_at": generation_task.get("updated_at")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting generation progress: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get progress: {str(e)}")
+
+# Wan 2.1 model recommendations endpoint
+@api_router.get("/wan21/recommendations/{video_id}")
+async def get_wan21_recommendations(
+    video_id: str,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Get Wan 2.1 model recommendations for a video"""
+    try:
+        db = get_db()
+        
+        # Get video from database
+        video = await db.videos.find_one({
+            "video_id": video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Get recommendations
+        analysis_result = video.get("analysis_result", {})
+        recommendations = wan21_video_service.get_model_recommendations(analysis_result)
+        
+        return {
+            "video_id": video_id,
+            "recommendations": recommendations,
+            "analysis_used": analysis_result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting recommendations: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get recommendations: {str(e)}")
+
+# Cancel Wan 2.1 generation endpoint
+@api_router.post("/wan21/generation/{generation_id}/cancel")
+async def cancel_wan21_generation(
+    generation_id: str,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Cancel Wan 2.1 generation"""
+    try:
+        db = get_db()
+        
+        # Get generation task
+        generation_task = await db.generation_tasks.find_one({
+            "generation_id": generation_id,
+            "user_id": current_user.id
+        })
+        
+        if not generation_task:
+            raise HTTPException(status_code=404, detail="Generation task not found")
+        
+        # Cancel generation
+        result = await wan21_video_service.cancel_generation(generation_task["video_id"])
+        
+        if result.get("success"):
+            # Update generation task
+            await db.generation_tasks.update_one(
+                {"generation_id": generation_id},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            
+            return {
+                "generation_id": generation_id,
+                "status": "cancelled",
+                "message": "Generation cancelled successfully"
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get("message", "Failed to cancel"))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel: {str(e)}")
+
+# Get user's generations
+@api_router.get("/wan21/generations")
+async def get_user_generations(
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Get all Wan 2.1 generations for the current user"""
+    try:
+        db = get_db()
+        generations = await db.generation_tasks.find({
+            "user_id": current_user.id
+        }).sort("created_at", -1).to_list(length=50)
+        
+        return {
+            "generations": generations,
+            "count": len(generations)
+        }
+        
+    except Exception as e:
+        logger.error(f"Get generations error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get generations: {str(e)}")
+
+# Update the existing generate endpoint to use Wan 2.1 by default
+@api_router.post("/generate-video")
+async def generate_video_new(
+    request: VideoGenerationRequest,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Start video generation using Wan 2.1 (updated endpoint)"""
+    try:
+        db = get_db()
+        
+        # Verify video exists and belongs to user
+        video = await db.videos.find_one({
+            "video_id": request.video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Ensure we have a plan
+        if not video.get("generation_plan"):
+            raise HTTPException(status_code=400, detail="No generation plan found. Please generate a plan first.")
+        
+        # Start background generation with Wan 2.1
+        asyncio.create_task(
+            wan21_video_service.generate_video_clips(
+                video_id=request.video_id,
+                plan=video.get("generation_plan", {}),
+                sample_video_path=video.get("sample_video_path", ""),
+                character_image_path=video.get("character_image_path"),
+                audio_path=video.get("audio_file_path")
+            )
+        )
+        
+        # Create generation task record
         generation_id = str(uuid.uuid4())
         generation_doc = {
             "generation_id": generation_id,
@@ -644,21 +879,23 @@ async def generate_video(
             "user_id": current_user.id,
             "model_preference": request.model_preference,
             "status": "queued",
+            "provider": "wan21",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         
         await db.generation_tasks.insert_one(generation_doc)
         
-        # TODO: Start background Wan 2.1 generation
-        
         return {
             "generation_id": generation_id,
             "video_id": request.video_id,
             "status": "queued",
-            "message": "Video generation started"
+            "message": "Video generation started with Wan 2.1",
+            "provider": "wan21"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Generation error: {e}")
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
