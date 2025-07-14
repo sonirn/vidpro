@@ -97,20 +97,30 @@ class HybridSystemTester:
             
             if response.status_code == 200:
                 data = response.json()
-                if "access_token" in data and "user" in data:
-                    self.access_token = data["access_token"]
-                    self.user_id = data["user"]["id"]
-                    
-                    # Set authorization header for future requests
-                    self.session.headers.update({
-                        "Authorization": f"Bearer {self.access_token}"
-                    })
-                    
-                    self.log_test("User Signup", True, "User registration successful", {
-                        "user_id": self.user_id,
-                        "email": data["user"]["email"],
-                        "has_token": bool(self.access_token)
-                    })
+                if "user" in data and "message" in data:
+                    # Handle case where session might be None (email confirmation required)
+                    if data.get("session") and data["session"].get("access_token"):
+                        self.access_token = data["session"]["access_token"]
+                        self.user_id = data["user"]["id"]
+                        
+                        # Set authorization header for future requests
+                        self.session.headers.update({
+                            "Authorization": f"Bearer {self.access_token}"
+                        })
+                        
+                        self.log_test("User Signup", True, "User registration successful with session", {
+                            "user_id": self.user_id,
+                            "email": data["user"]["email"],
+                            "has_token": bool(self.access_token)
+                        })
+                    else:
+                        # User created but no session (email confirmation required)
+                        self.user_id = data["user"]["id"]
+                        self.log_test("User Signup", True, "User registration successful (email confirmation required)", {
+                            "user_id": self.user_id,
+                            "email": data["user"]["email"],
+                            "confirmation_required": True
+                        })
                     return True
                 else:
                     self.log_test("User Signup", False, "Invalid signup response format", {"response": data})
