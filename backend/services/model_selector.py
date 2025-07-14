@@ -325,6 +325,37 @@ class ModelSelector:
                     score += 1
                     model_reasoning.append("Excellent for character-focused videos")
                 
+                # Wan 2.1 specific scoring
+                if model_name.startswith("wan21"):
+                    # Boost for open source preference
+                    score += 1
+                    model_reasoning.append("Open source solution")
+                    
+                    # Boost for longer duration needs
+                    if requirements["duration"] > 10:
+                        score += 3
+                        model_reasoning.append("Supports longer duration videos")
+                    
+                    # Character image availability
+                    if "i2v" in model_name and requirements.get("has_character_image", False):
+                        score += 3
+                        model_reasoning.append("Perfect for character image input")
+                    
+                    # Budget consideration
+                    if requirements["priority"] == "cost":
+                        score += 2
+                        model_reasoning.append("Cost-effective solution")
+                    
+                    # Hardware considerations
+                    if "1_3b" in model_name and requirements.get("hardware_constraint", False):
+                        score += 2
+                        model_reasoning.append("Works on consumer hardware")
+                
+                # Penalize commercial models for longer durations
+                if requirements["duration"] > 10 and model_name.startswith(("runway", "veo")):
+                    score -= 2
+                    model_reasoning.append("Limited duration for commercial models")
+                
                 scores[model_name] = score
                 reasoning[model_name] = model_reasoning
             
