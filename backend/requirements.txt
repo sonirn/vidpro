@@ -43,3 +43,4 @@ tokenizers
 jinja2
 supabase
 asyncpg
+google-generativeai>=0.3.0
