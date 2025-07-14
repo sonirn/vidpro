@@ -40,3 +40,4 @@ frozenlist
 openai
 tiktoken
 tokenizers
+jinja2
