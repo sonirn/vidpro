@@ -22,9 +22,9 @@ import random
 from services.video_generator import video_generation_service, VideoGenerationError
 from services.model_selector import model_selector
 # Import storage and processing services
-from services.storage import storage_manager
-from services.video_processor import video_processor
-from services.audio_generator import audio_generator
+# from services.storage import storage_manager  # Temporarily disabled for Supabase testing
+# from services.video_processor import video_processor  # Temporarily disabled for Supabase testing
+# from services.audio_generator import audio_generator  # Temporarily disabled for Supabase testing
 
 # Import Supabase services
 from services.supabase_service import supabase_service
