@@ -73,6 +73,22 @@ class VideoUploadRequest(BaseModel):
     filename: str
     context: Optional[str] = None
 
+class VideoUploadResponse(BaseModel):
+    video_id: str
+    status: str
+    message: str
+    
+class VideoAnalysisRequest(BaseModel):
+    video_id: str
+    
+class PlanGenerationRequest(BaseModel):
+    video_id: str
+    user_prompt: Optional[str] = ""
+    
+class PlanModificationRequest(BaseModel):
+    video_id: str
+    modification_request: str
+
 class ChatMessageRequest(BaseModel):
     message: str
     video_id: str
