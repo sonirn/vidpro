@@ -114,6 +114,339 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+# Video upload endpoint with multiple files
+@api_router.post("/upload-video")
+async def upload_video_files(
+    video_file: UploadFile = File(...),
+    character_image: Optional[UploadFile] = File(None),
+    audio_file: Optional[UploadFile] = File(None),
+    user_prompt: Optional[str] = "",
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Upload video, character image, and audio files"""
+    try:
+        # Validate video file
+        if not video_file.content_type.startswith('video/'):
+            raise HTTPException(status_code=400, detail="Invalid video file type")
+        
+        # Create video ID
+        video_id = str(uuid.uuid4())
+        
+        # Create uploads directory
+        uploads_dir = Path("/app/backend/uploads")
+        uploads_dir.mkdir(exist_ok=True)
+        
+        # Save video file
+        video_path = uploads_dir / f"{video_id}_video.mp4"
+        async with aiofiles.open(video_path, 'wb') as f:
+            content = await video_file.read()
+            await f.write(content)
+        
+        # Save character image if provided
+        character_image_path = None
+        if character_image:
+            if not character_image.content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail="Invalid image file type")
+            
+            character_image_path = uploads_dir / f"{video_id}_character.jpg"
+            async with aiofiles.open(character_image_path, 'wb') as f:
+                content = await character_image.read()
+                await f.write(content)
+        
+        # Save audio file if provided
+        audio_path = None
+        if audio_file:
+            if not audio_file.content_type.startswith('audio/'):
+                raise HTTPException(status_code=400, detail="Invalid audio file type")
+            
+            audio_path = uploads_dir / f"{video_id}_audio.mp3"
+            async with aiofiles.open(audio_path, 'wb') as f:
+                content = await audio_file.read()
+                await f.write(content)
+        
+        # Save to database
+        db = get_db()
+        video_doc = {
+            "video_id": video_id,
+            "user_id": current_user.id,
+            "sample_video_path": str(video_path),
+            "character_image_path": str(character_image_path) if character_image_path else None,
+            "audio_file_path": str(audio_path) if audio_path else None,
+            "user_prompt": user_prompt or "",
+            "upload_timestamp": datetime.utcnow(),
+            "file_size": video_file.size,
+            "duration": 0,  # Will be updated after analysis
+            "analysis_status": "pending",
+            "analysis_result": {},
+            "plan_status": "pending",
+            "generation_plan": {},
+            "generation_status": "pending",
+            "generated_video_path": "",
+            "cloudflare_url": "",
+            "expiry_date": datetime.utcnow() + timedelta(days=7),
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        await db.videos.insert_one(video_doc)
+        
+        return VideoUploadResponse(
+            video_id=video_id,
+            status="uploaded",
+            message="Video uploaded successfully. Analysis will begin shortly."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+# Video analysis endpoint
+@api_router.post("/analyze-video")
+async def analyze_video(
+    request: VideoAnalysisRequest,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Analyze uploaded video using Gemini AI"""
+    try:
+        db = get_db()
+        
+        # Get video from database
+        video = await db.videos.find_one({
+            "video_id": request.video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Update status to processing
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {"$set": {"analysis_status": "processing", "updated_at": datetime.utcnow()}}
+        )
+        
+        # Analyze video
+        analysis_result = await video_analyzer.analyze_video(
+            video_path=video["sample_video_path"],
+            character_image_path=video.get("character_image_path"),
+            audio_path=video.get("audio_file_path"),
+            user_prompt=video.get("user_prompt", "")
+        )
+        
+        # Update database with analysis results
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {
+                "$set": {
+                    "analysis_status": "complete",
+                    "analysis_result": analysis_result,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        return {
+            "video_id": request.video_id,
+            "status": "analysis_complete",
+            "analysis_result": analysis_result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video analysis error: {e}")
+        # Update status to failed
+        db = get_db()
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {"$set": {"analysis_status": "failed", "updated_at": datetime.utcnow()}}
+        )
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+# Plan generation endpoint
+@api_router.post("/generate-plan")
+async def generate_plan(
+    request: PlanGenerationRequest,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Generate video generation plan based on analysis"""
+    try:
+        db = get_db()
+        
+        # Get video from database
+        video = await db.videos.find_one({
+            "video_id": request.video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        if video.get("analysis_status") != "complete":
+            raise HTTPException(status_code=400, detail="Video analysis not complete")
+        
+        # Update status to processing
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {"$set": {"plan_status": "processing", "updated_at": datetime.utcnow()}}
+        )
+        
+        # Generate plan
+        plan_result = await plan_generator.generate_plan(
+            analysis_result=video["analysis_result"],
+            user_prompt=request.user_prompt
+        )
+        
+        # Update database with plan
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {
+                "$set": {
+                    "plan_status": "complete",
+                    "generation_plan": plan_result,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        return {
+            "video_id": request.video_id,
+            "status": "plan_generated",
+            "plan": plan_result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Plan generation error: {e}")
+        # Update status to failed
+        db = get_db()
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {"$set": {"plan_status": "failed", "updated_at": datetime.utcnow()}}
+        )
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+
+# Plan modification endpoint
+@api_router.post("/modify-plan")
+async def modify_plan(
+    request: PlanModificationRequest,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Modify existing plan based on user feedback"""
+    try:
+        db = get_db()
+        
+        # Get video from database
+        video = await db.videos.find_one({
+            "video_id": request.video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        if video.get("plan_status") not in ["complete", "modified"]:
+            raise HTTPException(status_code=400, detail="No plan available to modify")
+        
+        # Modify plan
+        modified_plan = await plan_generator.modify_plan(
+            current_plan=video["generation_plan"],
+            modification_request=request.modification_request
+        )
+        
+        # Update database with modified plan
+        await db.videos.update_one(
+            {"video_id": request.video_id},
+            {
+                "$set": {
+                    "plan_status": "modified",
+                    "generation_plan": modified_plan,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        return {
+            "video_id": request.video_id,
+            "status": "plan_modified",
+            "modified_plan": modified_plan
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Plan modification error: {e}")
+        raise HTTPException(status_code=500, detail=f"Plan modification failed: {str(e)}")
+
+# Get video info endpoint
+@api_router.get("/video/{video_id}")
+async def get_video_info(
+    video_id: str,
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Get video information and status"""
+    try:
+        db = get_db()
+        video = await db.videos.find_one({
+            "video_id": video_id,
+            "user_id": current_user.id
+        })
+        
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        return {
+            "video_id": video_id,
+            "upload_timestamp": video.get("upload_timestamp"),
+            "analysis_status": video.get("analysis_status"),
+            "plan_status": video.get("plan_status"),
+            "generation_status": video.get("generation_status"),
+            "expiry_date": video.get("expiry_date"),
+            "has_character_image": bool(video.get("character_image_path")),
+            "has_audio_file": bool(video.get("audio_file_path")),
+            "user_prompt": video.get("user_prompt", "")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Video info error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get video info: {str(e)}")
+
+# User videos endpoint
+@api_router.get("/user/videos")
+async def get_user_videos(
+    current_user: SupabaseAuthUser = Depends(get_current_user)
+):
+    """Get all videos for current user"""
+    try:
+        db = get_db()
+        videos = await db.videos.find({
+            "user_id": current_user.id
+        }).sort("created_at", -1).to_list(None)
+        
+        # Convert ObjectId to string and format response
+        formatted_videos = []
+        for video in videos:
+            formatted_videos.append({
+                "video_id": video["video_id"],
+                "upload_timestamp": video.get("upload_timestamp"),
+                "analysis_status": video.get("analysis_status"),
+                "plan_status": video.get("plan_status"),
+                "generation_status": video.get("generation_status"),
+                "expiry_date": video.get("expiry_date"),
+                "created_at": video.get("created_at")
+            })
+        
+        return {"videos": formatted_videos}
+        
+    except Exception as e:
+        logger.error(f"User videos error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get user videos: {str(e)}")
+
 # Authentication endpoints
 @api_router.post("/auth/signup")
 async def sign_up(request: SignUpRequest):
