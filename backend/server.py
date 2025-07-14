@@ -450,7 +450,7 @@ async def get_video_status(
             raise HTTPException(status_code=404, detail="Video not found")
         
         return VideoStatusResponse(
-            id=video['id'],
+            id=str(video['id']),
             filename=video['filename'],
             status=video['status'],
             analysis=video['analysis'],
