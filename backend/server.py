@@ -253,7 +253,7 @@ async def generate_video_plan(video_id: str, analysis: Dict[str, Any]):
         
         # Get Gemini key and create chat client
         gemini_key = get_next_gemini_key()
-        chat_client = LlmChat(api_key=gemini_key, model="gemini-2.0-flash-exp")
+        chat_client = LlmChat(api_key=gemini_key)
         
         # Generate plan
         response = chat_client.chat([UserMessage(content=plan_prompt)])
