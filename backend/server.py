@@ -319,11 +319,12 @@ async def get_user_profile(request: Request):
 @api_router.post("/upload", response_model=VideoUploadResponse)
 async def upload_video(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    character_image: Optional[UploadFile] = File(None),
+    audio_file: Optional[UploadFile] = File(None),
     user_prompt: str = ""
 ):
-    """Upload video file for analysis"""
+    """Upload video file for analysis with optional character image and audio"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
@@ -334,9 +335,15 @@ async def upload_video(
     if not quota_info['has_quota']:
         raise HTTPException(status_code=403, detail="Video quota exceeded")
     
-    # Validate file type
+    # Validate file types
     if not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="File must be a video")
+        raise HTTPException(status_code=400, detail="Main file must be a video")
+    
+    if character_image and not character_image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Character file must be an image")
+    
+    if audio_file and not audio_file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="Audio file must be an audio file")
     
     # Generate video ID
     video_id = str(uuid.uuid4())
@@ -345,46 +352,57 @@ async def upload_video(
     upload_dir = Path("/app/backend/uploads")
     upload_dir.mkdir(exist_ok=True)
     
-    # Save file
-    file_path = upload_dir / f"{video_id}.mp4"
-    async with aiofiles.open(file_path, "wb") as f:
+    # Save main video file
+    video_path = upload_dir / f"{video_id}.mp4"
+    async with aiofiles.open(video_path, "wb") as f:
         content = await file.read()
         await f.write(content)
     
-    # Create video record in database
-    db = get_db()
-    video_data = {
-        "video_id": video_id,
-        "user_id": user['user_id'],
-        "sample_video_path": str(file_path),
-        "character_image_path": "",
-        "audio_file_path": "",
-        "user_prompt": user_prompt,
-        "upload_timestamp": datetime.utcnow(),
-        "file_size": len(content),
-        "duration": 0.0,  # Will be updated during analysis
-        "analysis_status": "pending",
-        "analysis_result": {},
-        "plan_status": "pending",
-        "generation_plan": {},
-        "generation_status": "pending",
-        "generated_video_path": "",
-        "cloudflare_url": "",
-        "expiry_date": datetime.utcnow() + timedelta(days=7),
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
-    }
+    # Save character image if provided
+    character_image_path = ""
+    if character_image:
+        character_image_path = str(upload_dir / f"{video_id}_character.png")
+        async with aiofiles.open(character_image_path, "wb") as f:
+            img_content = await character_image.read()
+            await f.write(img_content)
     
-    db.videos.insert_one(video_data)
+    # Save audio file if provided
+    audio_file_path = ""
+    if audio_file:
+        audio_file_path = str(upload_dir / f"{video_id}_audio.mp3")
+        async with aiofiles.open(audio_file_path, "wb") as f:
+            audio_content = await audio_file.read()
+            await f.write(audio_content)
     
-    # Start background analysis
-    background_tasks.add_task(
-        analyze_video_task,
+    # Create video record using video service
+    video_service = get_video_service()
+    success = video_service.create_video_record(
+        user_id=user['user_id'],
+        video_id=video_id,
+        file_path=str(video_path),
+        character_image_path=character_image_path,
+        audio_file_path=audio_file_path,
+        user_prompt=user_prompt,
+        file_size=len(content)
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to create video record")
+    
+    # Create analysis task
+    task_service = get_task_service()
+    analysis_task_id = task_service.create_task(
         video_id=video_id,
         user_id=user['user_id'],
-        file_path=str(file_path),
-        user_prompt=user_prompt
+        task_type="analysis",
+        estimated_duration=300  # 5 minutes
     )
+    
+    if not analysis_task_id:
+        raise HTTPException(status_code=500, detail="Failed to create analysis task")
+    
+    # Update user quota
+    auth.update_user_quota(user['user_id'], quota_info['used'] + 1)
     
     return VideoUploadResponse(
         video_id=video_id,
