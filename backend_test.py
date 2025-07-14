@@ -527,9 +527,10 @@ class HybridSystemTester:
         print(f"Backend URL: {BACKEND_URL}")
         print("=" * 70)
         
-        # Hybrid system focused tests
+        # Authentication and user management tests
         tests = [
             ("Health Check", self.test_health_check),
+            ("Create Confirmed User", self.create_confirmed_test_user),
             ("User Signup", self.test_user_signup),
             ("User Signin", self.test_user_signin),
             ("User Info", self.test_user_info),
