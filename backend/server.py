@@ -30,6 +30,7 @@ from auth.supabase_auth import get_auth, verify_token, SupabaseAuthUser
 # Import video processing services
 from services.video_analyzer import video_analyzer
 from services.plan_generator import plan_generator
+from services.wan21_service import wan21_video_service
 
 # Configure logging
 logging.basicConfig(
