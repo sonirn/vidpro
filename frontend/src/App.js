@@ -304,19 +304,19 @@ const ChatInterface = ({ videoId, currentPlan, onPlanUpdate }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl p-6 max-w-4xl mx-auto mt-6">
-      <h3 className="text-xl font-bold text-gray-800 mb-4">Chat to Modify Your Plan</h3>
+    <div className="bg-black/30 backdrop-blur-xl rounded-3xl shadow-2xl p-6 max-w-4xl mx-auto mt-6 border border-white/10">
+      <h3 className="text-xl font-bold text-white mb-4">Chat to Modify Your Plan</h3>
       
-      <div className="h-64 overflow-y-auto bg-gray-50 rounded-lg p-4 mb-4">
+      <div className="h-64 overflow-y-auto bg-white/10 rounded-lg p-4 mb-4">
         {messages.length === 0 ? (
-          <p className="text-gray-500 text-center">Ask me to modify your video plan or ask questions about the generation process.</p>
+          <p className="text-gray-300 text-center">Ask me to modify your video plan or ask questions about the generation process.</p>
         ) : (
           messages.map((msg, index) => (
             <div key={index} className={`mb-3 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
               <div className={`inline-block p-3 rounded-lg max-w-xs ${
                 msg.role === 'user' 
-                  ? 'bg-blue-500 text-white' 
-                  : 'bg-white border border-gray-200'
+                  ? 'bg-purple-500 text-white' 
+                  : 'bg-black/40 border border-white/20 text-white'
               }`}>
                 {msg.content}
               </div>
@@ -332,11 +332,11 @@ const ChatInterface = ({ videoId, currentPlan, onPlanUpdate }) => {
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
           placeholder="Type your message..."
-          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="flex-1 px-4 py-2 bg-white/10 border border-white/20 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white placeholder-gray-400"
         />
         <button
           onClick={sendMessage}
-          className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+          className="bg-gradient-to-r from-purple-500 to-blue-600 text-white px-6 py-2 rounded-lg hover:from-purple-600 hover:to-blue-700 transition-all duration-200"
         >
           Send
         </button>
