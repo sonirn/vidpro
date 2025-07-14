@@ -158,6 +158,24 @@ class HybridSystemTester:
                     
                     # Update session with signin token
                     self.access_token = signin_token
+                    self.user_id = data["user"]["id"]
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {self.access_token}"
+                    })
+                    
+                    self.log_test("User Signin", True, "User signin successful", {
+                        "user_id": data["user"]["id"],
+                        "email": data["user"]["email"],
+                        "has_token": bool(self.access_token)
+                    })
+                    return True
+                elif "session" in data and data["session"] and data["session"].get("access_token"):
+                    # Handle session-based response
+                    signin_token = data["session"]["access_token"]
+                    
+                    # Update session with signin token
+                    self.access_token = signin_token
+                    self.user_id = data["user"]["id"]
                     self.session.headers.update({
                         "Authorization": f"Bearer {self.access_token}"
                     })
