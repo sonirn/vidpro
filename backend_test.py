@@ -472,7 +472,205 @@ class HybridSystemTester:
             self.log_test("User Videos", False, f"User videos error: {str(e)}")
         return False
     
-    def test_unauthorized_access(self):
+    def test_video_upload_new(self):
+        """Test POST /api/upload-video endpoint (new multi-file upload)"""
+        if not self.access_token:
+            self.log_test("Video Upload (New)", False, "No access token available")
+            return False
+            
+        test_file_path = self.create_test_video_file()
+        if not test_file_path:
+            return False
+            
+        try:
+            with open(test_file_path, 'rb') as f:
+                files = {'video_file': ('test_video.mp4', f, 'video/mp4')}
+                data = {'user_prompt': 'Test video upload with new endpoint'}
+                
+                response = self.session.post(
+                    f"{BACKEND_URL}/upload-video",
+                    files=files,
+                    data=data,
+                    timeout=TEST_TIMEOUT
+                )
+            
+            # Clean up test file
+            os.unlink(test_file_path)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data and "status" in data:
+                    self.video_id = data["video_id"]
+                    self.log_test("Video Upload (New)", True, "New video upload successful", {
+                        "video_id": self.video_id,
+                        "status": data.get("status"),
+                        "message": data.get("message")
+                    })
+                    return True
+                else:
+                    self.log_test("Video Upload (New)", False, "Invalid upload response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("Video Upload (New)", False, "Upload failed - authentication required")
+            else:
+                self.log_test("Video Upload (New)", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Upload (New)", False, f"Upload error: {str(e)}")
+            # Clean up test file if it exists
+            try:
+                os.unlink(test_file_path)
+            except:
+                pass
+        return False
+    
+    def test_video_analysis(self):
+        """Test POST /api/analyze-video endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Video Analysis", False, "No access token or video ID available")
+            return False
+            
+        try:
+            analysis_data = {
+                "video_id": self.video_id
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/analyze-video",
+                json=analysis_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data and "status" in data:
+                    self.log_test("Video Analysis", True, "Video analysis initiated", {
+                        "video_id": data["video_id"],
+                        "status": data["status"],
+                        "has_analysis_result": "analysis_result" in data
+                    })
+                    return True
+                else:
+                    self.log_test("Video Analysis", False, "Invalid analysis response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Video Analysis", False, "Video not found for analysis")
+            elif response.status_code == 401:
+                self.log_test("Video Analysis", False, "Analysis failed - authentication required")
+            else:
+                self.log_test("Video Analysis", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Analysis", False, f"Analysis error: {str(e)}")
+        return False
+    
+    def test_plan_generation(self):
+        """Test POST /api/generate-plan endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Plan Generation", False, "No access token or video ID available")
+            return False
+            
+        try:
+            plan_data = {
+                "video_id": self.video_id,
+                "user_prompt": "Generate a creative video plan"
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/generate-plan",
+                json=plan_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data and "status" in data:
+                    self.log_test("Plan Generation", True, "Plan generation initiated", {
+                        "video_id": data["video_id"],
+                        "status": data["status"],
+                        "has_plan": "plan" in data
+                    })
+                    return True
+                else:
+                    self.log_test("Plan Generation", False, "Invalid plan response format", {"response": data})
+            elif response.status_code == 400:
+                # Analysis not complete is expected for this test
+                self.log_test("Plan Generation", True, "Plan generation requires completed analysis (expected)", {
+                    "video_id": self.video_id,
+                    "dependency_check": "analysis_required"
+                })
+                return True
+            elif response.status_code == 404:
+                self.log_test("Plan Generation", False, "Video not found for plan generation")
+            elif response.status_code == 401:
+                self.log_test("Plan Generation", False, "Plan generation failed - authentication required")
+            else:
+                self.log_test("Plan Generation", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Plan Generation", False, f"Plan generation error: {str(e)}")
+        return False
+    
+    def test_video_info(self):
+        """Test GET /api/video/{video_id} endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Video Info", False, "No access token or video ID available")
+            return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/video/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data:
+                    self.log_test("Video Info", True, "Video info retrieval successful", {
+                        "video_id": data["video_id"],
+                        "analysis_status": data.get("analysis_status"),
+                        "plan_status": data.get("plan_status"),
+                        "generation_status": data.get("generation_status"),
+                        "has_expiry": "expiry_date" in data
+                    })
+                    return True
+                else:
+                    self.log_test("Video Info", False, "Invalid video info response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Video Info", False, "Video not found or access denied")
+            elif response.status_code == 401:
+                self.log_test("Video Info", False, "Video info failed - authentication required")
+            else:
+                self.log_test("Video Info", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Info", False, f"Video info error: {str(e)}")
+        return False
+    
+    def test_user_videos_new(self):
+        """Test GET /api/user/videos endpoint (new endpoint)"""
+        if not self.access_token:
+            self.log_test("User Videos (New)", False, "No access token available")
+            return False
+            
+        try:
+            response = self.session.get(f"{BACKEND_URL}/user/videos", timeout=TEST_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "videos" in data:
+                    videos = data["videos"]
+                    has_test_video = any(v.get("video_id") == self.video_id for v in videos) if self.video_id else False
+                    
+                    self.log_test("User Videos (New)", True, f"Retrieved user videos from new endpoint", {
+                        "video_count": len(videos),
+                        "has_test_video": has_test_video,
+                        "user_specific": True
+                    })
+                    return True
+                else:
+                    self.log_test("User Videos (New)", False, "Invalid response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("User Videos (New)", False, "Videos access failed - authentication required")
+            else:
+                self.log_test("User Videos (New)", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Videos (New)", False, f"User videos error: {str(e)}")
+        return False
         """Test that endpoints properly reject unauthorized requests"""
         try:
             # Remove authorization header
