@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/backend/.env')
 
 # Configuration
-BACKEND_URL = "https://e705c305-7757-4428-8e9c-ab38a6aa068c.preview.emergentagent.com/api"
+BACKEND_URL = "https://5e36b487-0625-4226-a01c-196317abca68.preview.emergentagent.com/api"
 TEST_TIMEOUT = 30
 
 class HybridSystemTester:
