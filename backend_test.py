@@ -47,7 +47,48 @@ class HybridSystemTester:
         if details and not success:
             print(f"   Details: {details}")
     
-    def create_test_video_file(self):
+    def create_confirmed_test_user(self):
+        """Create a test user with confirmed email using admin client"""
+        try:
+            # Import Supabase admin client
+            from supabase import create_client
+            import os
+            
+            supabase_url = os.environ.get('SUPABASE_URL')
+            supabase_service_key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+            
+            if not supabase_url or not supabase_service_key:
+                self.log_test("Create Confirmed User", False, "Missing Supabase admin credentials")
+                return False
+            
+            admin_client = create_client(supabase_url, supabase_service_key)
+            
+            # Create user with email confirmation bypassed
+            response = admin_client.auth.admin.create_user({
+                "email": self.test_user_email,
+                "password": self.test_user_password,
+                "email_confirm": True  # Skip email confirmation
+            })
+            
+            if response.user:
+                self.user_id = response.user.id
+                self.log_test("Create Confirmed User", True, "Test user created with confirmed email", {
+                    "user_id": self.user_id,
+                    "email": self.test_user_email
+                })
+                return True
+            else:
+                self.log_test("Create Confirmed User", False, "Failed to create confirmed user")
+                return False
+                
+        except Exception as e:
+            # If user already exists, that's fine for testing
+            if "already registered" in str(e).lower() or "user_already_exists" in str(e).lower():
+                self.log_test("Create Confirmed User", True, "User already exists (acceptable for testing)")
+                return True
+            else:
+                self.log_test("Create Confirmed User", False, f"Error creating confirmed user: {str(e)}")
+                return False
         """Create a small test MP4 file for upload testing"""
         try:
             # Create a minimal MP4 file (just headers, not a real video)
