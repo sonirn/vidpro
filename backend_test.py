@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/backend/.env')
 
 # Configuration
-BACKEND_URL = "https://796fafe1-2666-481d-a6cd-75fb902d66c3.preview.emergentagent.com/api"
+BACKEND_URL = "https://e705c305-7757-4428-8e9c-ab38a6aa068c.preview.emergentagent.com/api"
 TEST_TIMEOUT = 30
 
 class SupabaseIntegrationTester:
