@@ -31,3 +31,4 @@ httpx>=0.24.0
 litellm
 bcrypt>=4.0.0
 aiohttp>=3.12.0multidict
+attrs
