@@ -116,13 +116,12 @@ class MongoDBAuth:
             # Generate token
             token = self.generate_token(user['user_id'])
             
-            # Return user data without password hash
-            user.pop('password_hash')
-            user.pop('_id')  # Remove MongoDB ObjectId
+            # Return user data without password hash and _id
+            response_user = {k: v for k, v in user.items() if k not in ['password_hash', '_id']}
             
             return {
                 "success": True,
-                "user": user,
+                "user": response_user,
                 "token": token
             }
             
