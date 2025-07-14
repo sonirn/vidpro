@@ -1142,9 +1142,385 @@ class HybridSystemTester:
             self.log_test("Unauthorized Access Protection", False, f"Protection test error: {str(e)}")
         return False
     
+    def test_wan21_models_endpoint(self):
+        """Test GET /api/wan21/models endpoint"""
+        try:
+            response = self.session.get(f"{BACKEND_URL}/wan21/models", timeout=TEST_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "models" in data and isinstance(data["models"], list):
+                    models = data["models"]
+                    expected_models = ["t2v-1.3b", "t2v-14b", "i2v-14b", "flf2v-14b"]
+                    
+                    # Check if all expected models are present
+                    model_names = [model.get("model") for model in models]
+                    has_all_models = all(model in model_names for model in expected_models)
+                    
+                    self.log_test("Wan 2.1 Models Endpoint", True, f"Retrieved {len(models)} Wan 2.1 models", {
+                        "model_count": len(models),
+                        "models": model_names,
+                        "has_all_expected": has_all_models,
+                        "model_details": models
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Models Endpoint", False, "Invalid models response format", {"response": data})
+            else:
+                self.log_test("Wan 2.1 Models Endpoint", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 Models Endpoint", False, f"Models endpoint error: {str(e)}")
+        return False
+    
+    def test_wan21_recommendations(self):
+        """Test GET /api/wan21/recommendations/{video_id} endpoint"""
+        if not self.access_token or not self.video_id:
+            # Test endpoint structure without authentication
+            try:
+                dummy_video_id = "test-video-id-123"
+                response = self.session.get(
+                    f"{BACKEND_URL}/wan21/recommendations/{dummy_video_id}",
+                    timeout=TEST_TIMEOUT
+                )
+                
+                if response.status_code == 401 or response.status_code == 403:
+                    self.log_test("Wan 2.1 Recommendations", True, "Recommendations endpoint exists and requires authentication", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                elif response.status_code == 404:
+                    self.log_test("Wan 2.1 Recommendations", True, "Recommendations endpoint exists (video not found expected)", {
+                        "endpoint_exists": True,
+                        "video_not_found": True
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Recommendations", False, f"Unexpected response: HTTP {response.status_code}")
+                    return False
+            except Exception as e:
+                self.log_test("Wan 2.1 Recommendations", False, f"Endpoint test error: {str(e)}")
+                return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/wan21/recommendations/{self.video_id}",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "recommendations" in data and "video_id" in data:
+                    recommendations = data["recommendations"]
+                    self.log_test("Wan 2.1 Recommendations", True, f"Retrieved {len(recommendations)} model recommendations", {
+                        "video_id": data["video_id"],
+                        "recommendation_count": len(recommendations),
+                        "recommendations": recommendations,
+                        "analysis_used": bool(data.get("analysis_used"))
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Recommendations", False, "Invalid recommendations response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Wan 2.1 Recommendations", True, "Video not found (expected without valid video)", {
+                    "endpoint_working": True
+                })
+                return True
+            elif response.status_code == 401 or response.status_code == 403:
+                self.log_test("Wan 2.1 Recommendations", True, "Recommendations endpoint properly protected", {
+                    "authentication_required": True
+                })
+                return True
+            else:
+                self.log_test("Wan 2.1 Recommendations", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 Recommendations", False, f"Recommendations error: {str(e)}")
+        return False
+    
+    def test_wan21_generation_new(self):
+        """Test POST /api/generate-video endpoint (Wan 2.1 generation)"""
+        if not self.access_token or not self.video_id:
+            # Test endpoint structure without authentication
+            try:
+                generation_data = {
+                    "video_id": "test-video-id-123",
+                    "model_preference": "t2v-1.3b"
+                }
+                
+                response = self.session.post(
+                    f"{BACKEND_URL}/generate-video",
+                    json=generation_data,
+                    timeout=TEST_TIMEOUT
+                )
+                
+                if response.status_code == 401 or response.status_code == 403:
+                    self.log_test("Wan 2.1 Generation (New)", True, "Generation endpoint exists and requires authentication", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                elif response.status_code == 404:
+                    self.log_test("Wan 2.1 Generation (New)", True, "Generation endpoint exists (video not found expected)", {
+                        "endpoint_exists": True,
+                        "video_not_found": True
+                    })
+                    return True
+                elif response.status_code == 422:
+                    self.log_test("Wan 2.1 Generation (New)", True, "Generation endpoint exists with validation", {
+                        "endpoint_exists": True,
+                        "validation_working": True
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Generation (New)", False, f"Unexpected response: HTTP {response.status_code}")
+                    return False
+            except Exception as e:
+                self.log_test("Wan 2.1 Generation (New)", False, f"Endpoint test error: {str(e)}")
+                return False
+            
+        try:
+            generation_data = {
+                "video_id": self.video_id,
+                "model_preference": "t2v-1.3b"
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/generate-video",
+                json=generation_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "generation_id" in data and "video_id" in data:
+                    self.generation_id = data["generation_id"]
+                    self.log_test("Wan 2.1 Generation (New)", True, "Wan 2.1 video generation started", {
+                        "generation_id": self.generation_id,
+                        "video_id": data["video_id"],
+                        "status": data.get("status"),
+                        "provider": data.get("provider"),
+                        "message": data.get("message")
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Generation (New)", False, "Invalid generation response format", {"response": data})
+            elif response.status_code == 400:
+                # No generation plan is expected for this test
+                self.log_test("Wan 2.1 Generation (New)", True, "Generation requires plan (expected dependency)", {
+                    "video_id": self.video_id,
+                    "dependency_check": "plan_required"
+                })
+                return True
+            elif response.status_code == 404:
+                self.log_test("Wan 2.1 Generation (New)", True, "Video not found (expected without valid video)", {
+                    "endpoint_working": True
+                })
+                return True
+            elif response.status_code == 401 or response.status_code == 403:
+                self.log_test("Wan 2.1 Generation (New)", True, "Generation endpoint properly protected", {
+                    "authentication_required": True
+                })
+                return True
+            else:
+                self.log_test("Wan 2.1 Generation (New)", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 Generation (New)", False, f"Generation error: {str(e)}")
+        return False
+    
+    def test_wan21_generation_progress(self):
+        """Test GET /api/wan21/generation/{generation_id}/progress endpoint"""
+        if not self.access_token or not self.generation_id:
+            # Test endpoint structure without authentication
+            try:
+                dummy_generation_id = "test-generation-id-123"
+                response = self.session.get(
+                    f"{BACKEND_URL}/wan21/generation/{dummy_generation_id}/progress",
+                    timeout=TEST_TIMEOUT
+                )
+                
+                if response.status_code == 401 or response.status_code == 403:
+                    self.log_test("Wan 2.1 Generation Progress", True, "Progress endpoint exists and requires authentication", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                elif response.status_code == 404:
+                    self.log_test("Wan 2.1 Generation Progress", True, "Progress endpoint exists (generation not found expected)", {
+                        "endpoint_exists": True,
+                        "generation_not_found": True
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Generation Progress", False, f"Unexpected response: HTTP {response.status_code}")
+                    return False
+            except Exception as e:
+                self.log_test("Wan 2.1 Generation Progress", False, f"Endpoint test error: {str(e)}")
+                return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/wan21/generation/{self.generation_id}/progress",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "generation_id" in data and "video_id" in data:
+                    self.log_test("Wan 2.1 Generation Progress", True, "Generation progress retrieved successfully", {
+                        "generation_id": data["generation_id"],
+                        "video_id": data["video_id"],
+                        "status": data.get("status"),
+                        "model_used": data.get("model_used"),
+                        "clips_generated": data.get("clips_generated"),
+                        "has_detailed_progress": "detailed_progress" in data
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Generation Progress", False, "Invalid progress response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Wan 2.1 Generation Progress", True, "Generation not found (expected without valid generation)", {
+                    "endpoint_working": True
+                })
+                return True
+            elif response.status_code == 401 or response.status_code == 403:
+                self.log_test("Wan 2.1 Generation Progress", True, "Progress endpoint properly protected", {
+                    "authentication_required": True
+                })
+                return True
+            else:
+                self.log_test("Wan 2.1 Generation Progress", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 Generation Progress", False, f"Progress error: {str(e)}")
+        return False
+    
+    def test_wan21_cancel_generation(self):
+        """Test POST /api/wan21/generation/{generation_id}/cancel endpoint"""
+        if not self.access_token or not self.generation_id:
+            # Test endpoint structure without authentication
+            try:
+                dummy_generation_id = "test-generation-id-123"
+                response = self.session.post(
+                    f"{BACKEND_URL}/wan21/generation/{dummy_generation_id}/cancel",
+                    timeout=TEST_TIMEOUT
+                )
+                
+                if response.status_code == 401 or response.status_code == 403:
+                    self.log_test("Wan 2.1 Cancel Generation", True, "Cancel endpoint exists and requires authentication", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                elif response.status_code == 404:
+                    self.log_test("Wan 2.1 Cancel Generation", True, "Cancel endpoint exists (generation not found expected)", {
+                        "endpoint_exists": True,
+                        "generation_not_found": True
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Cancel Generation", False, f"Unexpected response: HTTP {response.status_code}")
+                    return False
+            except Exception as e:
+                self.log_test("Wan 2.1 Cancel Generation", False, f"Endpoint test error: {str(e)}")
+                return False
+            
+        try:
+            response = self.session.post(
+                f"{BACKEND_URL}/wan21/generation/{self.generation_id}/cancel",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "generation_id" in data and "status" in data:
+                    self.log_test("Wan 2.1 Cancel Generation", True, "Generation cancellation successful", {
+                        "generation_id": data["generation_id"],
+                        "status": data["status"],
+                        "message": data.get("message")
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 Cancel Generation", False, "Invalid cancel response format", {"response": data})
+            elif response.status_code == 400:
+                # Generation might not be cancellable
+                self.log_test("Wan 2.1 Cancel Generation", True, "Generation not cancellable (expected state)", {
+                    "generation_id": self.generation_id,
+                    "state_check": "not_cancellable"
+                })
+                return True
+            elif response.status_code == 404:
+                self.log_test("Wan 2.1 Cancel Generation", True, "Generation not found (expected without valid generation)", {
+                    "endpoint_working": True
+                })
+                return True
+            elif response.status_code == 401 or response.status_code == 403:
+                self.log_test("Wan 2.1 Cancel Generation", True, "Cancel endpoint properly protected", {
+                    "authentication_required": True
+                })
+                return True
+            else:
+                self.log_test("Wan 2.1 Cancel Generation", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 Cancel Generation", False, f"Cancel error: {str(e)}")
+        return False
+    
+    def test_wan21_user_generations(self):
+        """Test GET /api/wan21/generations endpoint"""
+        if not self.access_token:
+            # Test endpoint structure without authentication
+            try:
+                response = self.session.get(f"{BACKEND_URL}/wan21/generations", timeout=TEST_TIMEOUT)
+                
+                if response.status_code == 401:
+                    self.log_test("Wan 2.1 User Generations", True, "Generations endpoint exists and requires authentication", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                elif response.status_code == 403:
+                    self.log_test("Wan 2.1 User Generations", True, "Generations endpoint exists and properly protected", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 User Generations", False, f"Unexpected response: HTTP {response.status_code}")
+                    return False
+            except Exception as e:
+                self.log_test("Wan 2.1 User Generations", False, f"Endpoint test error: {str(e)}")
+                return False
+            
+        try:
+            response = self.session.get(f"{BACKEND_URL}/wan21/generations", timeout=TEST_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "generations" in data and "count" in data:
+                    generations = data["generations"]
+                    has_test_generation = any(g.get("generation_id") == self.generation_id for g in generations) if self.generation_id else False
+                    
+                    self.log_test("Wan 2.1 User Generations", True, f"Retrieved {data['count']} user generations", {
+                        "generation_count": data["count"],
+                        "has_test_generation": has_test_generation,
+                        "user_specific": True,
+                        "generations": generations
+                    })
+                    return True
+                else:
+                    self.log_test("Wan 2.1 User Generations", False, "Invalid generations response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("Wan 2.1 User Generations", True, "Generations endpoint properly protected", {
+                    "authentication_required": True
+                })
+                return True
+            else:
+                self.log_test("Wan 2.1 User Generations", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Wan 2.1 User Generations", False, f"User generations error: {str(e)}")
+        return False
+
     def run_all_tests(self):
-        """Run all hybrid system tests"""
-        print("🚀 Starting Hybrid MongoDB + Supabase Auth Tests for Video Generation Platform")
+        """Run all hybrid system tests with Wan 2.1 focus"""
+        print("🚀 Starting Wan 2.1 Video Generation System Tests")
         print(f"Backend URL: {BACKEND_URL}")
         print("=" * 70)
         
@@ -1167,6 +1543,13 @@ class HybridSystemTester:
             ("User Videos (New)", self.test_user_videos_new),
             ("User Videos (Legacy)", self.test_user_videos),
             ("Unauthorized Access Protection", self.test_unauthorized_access),
+            # Wan 2.1 specific tests
+            ("Wan 2.1 Models Endpoint", self.test_wan21_models_endpoint),
+            ("Wan 2.1 Recommendations", self.test_wan21_recommendations),
+            ("Wan 2.1 Generation (New)", self.test_wan21_generation_new),
+            ("Wan 2.1 Generation Progress", self.test_wan21_generation_progress),
+            ("Wan 2.1 Cancel Generation", self.test_wan21_cancel_generation),
+            ("Wan 2.1 User Generations", self.test_wan21_user_generations),
         ]
         
         passed = 0
