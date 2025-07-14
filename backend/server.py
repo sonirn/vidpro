@@ -7,6 +7,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import os
 import logging
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
@@ -19,9 +23,6 @@ import shutil
 from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
 import random
 import mimetypes
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 # Import MongoDB configuration and authentication
 from database.mongodb_config import initialize_database, get_db
