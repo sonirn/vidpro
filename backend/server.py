@@ -634,6 +634,24 @@ async def get_user_tasks(request: Request, limit: int = 10):
     
     return {"tasks": tasks}
 
+@api_router.get("/videos")
+async def get_user_videos(request: Request, limit: int = 20):
+    """Get user's video history"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    # Get videos using video service
+    video_service = get_video_service()
+    videos = video_service.get_user_videos(user['user_id'], limit)
+    
+    # Add expiry information
+    for video in videos:
+        expiry_info = video_service.check_video_expiry(video['video_id'])
+        video['expiry_info'] = expiry_info
+    
+    return {"videos": videos}
+
 @api_router.get("/task/{task_id}")
 async def get_task_status(task_id: str, request: Request):
     """Get specific task status"""
