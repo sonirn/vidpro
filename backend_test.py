@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+"""
+Backend API Testing Script for Video Generation Application - Hybrid MongoDB + Supabase Auth System
+Tests MongoDB data storage with Supabase authentication integration
+"""
+
+import requests
+import json
+import time
+import os
+import tempfile
+import uuid
+from pathlib import Path
+
+# Load environment variables from backend
+import sys
+sys.path.append('/app/backend')
+from dotenv import load_dotenv
+load_dotenv('/app/backend/.env')
+
+# Configuration
+BACKEND_URL = "https://e705c305-7757-4428-8e9c-ab38a6aa068c.preview.emergentagent.com/api"
+TEST_TIMEOUT = 30
+
+class HybridSystemTester:
+    def __init__(self):
+        self.session = requests.Session()
+        self.test_results = []
+        self.access_token = None
+        self.user_id = None
+        self.video_id = None
+        self.generation_id = None
+        self.test_user_email = f"testuser_{int(time.time())}@example.com"
+        self.test_user_password = "TestPassword123!"
+        
+    def log_test(self, test_name, success, message, details=None):
+        """Log test results"""
+        result = {
+            "test": test_name,
+            "success": success,
+            "message": message,
+            "details": details or {}
+        }
+        self.test_results.append(result)
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status}: {test_name} - {message}")
+        if details and not success:
+            print(f"   Details: {details}")
+    
+    def create_test_video_file(self):
+        """Create a small test MP4 file for upload testing"""
+        try:
+            # Create a minimal MP4 file (just headers, not a real video)
+            mp4_header = b'\x00\x00\x00\x20ftypmp41\x00\x00\x00\x00mp41isom'
+            
+            temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+            temp_file.write(mp4_header)
+            temp_file.write(b'\x00' * 1000)  # Add some dummy data
+            temp_file.close()
+            
+            return temp_file.name
+        except Exception as e:
+            self.log_test("Create Test Video", False, f"Failed to create test video: {str(e)}")
+            return None
+    
+    def test_health_check(self):
+        """Test GET /api/health endpoint"""
+        try:
+            response = self.session.get(f"{BACKEND_URL}/health", timeout=TEST_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "status" in data and data["status"] == "healthy":
+                    self.log_test("Health Check", True, "API is running and healthy", {"response": data})
+                    return True
+                else:
+                    self.log_test("Health Check", False, "Invalid health response format", {"response": data})
+            else:
+                self.log_test("Health Check", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Health Check", False, f"Connection error: {str(e)}")
+        return False
+    
+    def test_user_signup(self):
+        """Test POST /api/auth/signup endpoint"""
+        try:
+            signup_data = {
+                "email": self.test_user_email,
+                "password": self.test_user_password
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/auth/signup",
+                json=signup_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "access_token" in data and "user" in data:
+                    self.access_token = data["access_token"]
+                    self.user_id = data["user"]["id"]
+                    
+                    # Set authorization header for future requests
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {self.access_token}"
+                    })
+                    
+                    self.log_test("User Signup", True, "User registration successful", {
+                        "user_id": self.user_id,
+                        "email": data["user"]["email"],
+                        "has_token": bool(self.access_token)
+                    })
+                    return True
+                else:
+                    self.log_test("User Signup", False, "Invalid signup response format", {"response": data})
+            elif response.status_code == 400:
+                error_data = response.json()
+                self.log_test("User Signup", False, f"Signup validation error: {error_data.get('detail')}")
+            else:
+                self.log_test("User Signup", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Signup", False, f"Signup error: {str(e)}")
+        return False
+    
+    def test_user_signin(self):
+        """Test POST /api/auth/signin endpoint"""
+        try:
+            # First, clear any existing auth headers
+            if "Authorization" in self.session.headers:
+                del self.session.headers["Authorization"]
+            
+            signin_data = {
+                "email": self.test_user_email,
+                "password": self.test_user_password
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/auth/signin",
+                json=signin_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "access_token" in data and "user" in data:
+                    signin_token = data["access_token"]
+                    
+                    # Update session with signin token
+                    self.access_token = signin_token
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {self.access_token}"
+                    })
+                    
+                    self.log_test("User Signin", True, "User signin successful", {
+                        "user_id": data["user"]["id"],
+                        "email": data["user"]["email"],
+                        "has_token": bool(self.access_token)
+                    })
+                    return True
+                else:
+                    self.log_test("User Signin", False, "Invalid signin response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("User Signin", False, "Invalid credentials")
+            else:
+                self.log_test("User Signin", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Signin", False, f"Signin error: {str(e)}")
+        return False
+    
+    def test_user_info(self):
+        """Test GET /api/auth/user endpoint"""
+        if not self.access_token:
+            self.log_test("User Info", False, "No access token available")
+            return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/auth/user",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "user" in data:
+                    user_data = data["user"]
+                    self.log_test("User Info", True, "User info retrieval successful", {
+                        "user_id": user_data.get("id"),
+                        "email": user_data.get("email"),
+                        "token_valid": True
+                    })
+                    return True
+                else:
+                    self.log_test("User Info", False, "Invalid user info response", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("User Info", False, "Token validation failed - unauthorized")
+            else:
+                self.log_test("User Info", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Info", False, f"User info error: {str(e)}")
+        return False
+    
+    def test_video_upload(self):
+        """Test POST /api/upload endpoint with authentication"""
+        if not self.access_token:
+            self.log_test("Video Upload", False, "No access token available")
+            return False
+            
+        test_file_path = self.create_test_video_file()
+        if not test_file_path:
+            return False
+            
+        try:
+            with open(test_file_path, 'rb') as f:
+                files = {'video_file': ('test_video.mp4', f, 'video/mp4')}
+                data = {'context': 'Test video upload with MongoDB storage'}
+                
+                response = self.session.post(
+                    f"{BACKEND_URL}/upload",
+                    files=files,
+                    data=data,
+                    timeout=TEST_TIMEOUT
+                )
+            
+            # Clean up test file
+            os.unlink(test_file_path)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data and "message" in data:
+                    self.video_id = data["video_id"]
+                    self.log_test("Video Upload", True, "Video upload successful", {
+                        "video_id": self.video_id,
+                        "status": data.get("status"),
+                        "message": data.get("message")
+                    })
+                    return True
+                else:
+                    self.log_test("Video Upload", False, "Invalid upload response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("Video Upload", False, "Upload failed - authentication required")
+            else:
+                self.log_test("Video Upload", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Upload", False, f"Upload error: {str(e)}")
+            # Clean up test file if it exists
+            try:
+                os.unlink(test_file_path)
+            except:
+                pass
+        return False
+    
+    def test_video_status(self):
+        """Test GET /api/video/{video_id}/status endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Video Status", False, "No access token or video ID available")
+            return False
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/video/{self.video_id}/status",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "video_id" in data and "status" in data:
+                    self.log_test("Video Status", True, "Video status retrieval successful", {
+                        "video_id": data["video_id"],
+                        "status": data["status"],
+                        "progress": data.get("progress", 0),
+                        "created_at": data.get("created_at"),
+                        "updated_at": data.get("updated_at")
+                    })
+                    return True
+                else:
+                    self.log_test("Video Status", False, "Invalid status response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Video Status", False, "Video not found or access denied")
+            elif response.status_code == 401:
+                self.log_test("Video Status", False, "Status check failed - authentication required")
+            else:
+                self.log_test("Video Status", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Status", False, f"Status check error: {str(e)}")
+        return False
+    
+    def test_chat_interface(self):
+        """Test POST /api/chat endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Chat Interface", False, "No access token or video ID available")
+            return False
+            
+        try:
+            chat_data = {
+                "message": "Can you help me modify the video plan?",
+                "video_id": self.video_id
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/chat",
+                json=chat_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "response" in data and "video_id" in data:
+                    self.log_test("Chat Interface", True, "Chat interaction successful", {
+                        "response_length": len(data["response"]),
+                        "video_id": data["video_id"]
+                    })
+                    return True
+                else:
+                    self.log_test("Chat Interface", False, "Invalid chat response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Chat Interface", False, "Video not found for chat")
+            elif response.status_code == 401:
+                self.log_test("Chat Interface", False, "Chat failed - authentication required")
+            else:
+                self.log_test("Chat Interface", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Chat Interface", False, f"Chat error: {str(e)}")
+        return False
+    
+    def test_video_generation(self):
+        """Test POST /api/generate endpoint"""
+        if not self.access_token or not self.video_id:
+            self.log_test("Video Generation", False, "No access token or video ID available")
+            return False
+            
+        try:
+            generation_data = {
+                "video_id": self.video_id,
+                "model_preference": "auto"
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/generate",
+                json=generation_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "generation_id" in data and "video_id" in data:
+                    self.generation_id = data["generation_id"]
+                    self.log_test("Video Generation", True, "Video generation started", {
+                        "generation_id": self.generation_id,
+                        "video_id": data["video_id"],
+                        "status": data.get("status"),
+                        "message": data.get("message")
+                    })
+                    return True
+                else:
+                    self.log_test("Video Generation", False, "Invalid generation response format", {"response": data})
+            elif response.status_code == 404:
+                self.log_test("Video Generation", False, "Video not found for generation")
+            elif response.status_code == 401:
+                self.log_test("Video Generation", False, "Generation failed - authentication required")
+            else:
+                self.log_test("Video Generation", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Video Generation", False, f"Generation error: {str(e)}")
+        return False
+    
+    def test_user_videos(self):
+        """Test GET /api/videos endpoint"""
+        if not self.access_token:
+            self.log_test("User Videos", False, "No access token available")
+            return False
+            
+        try:
+            response = self.session.get(f"{BACKEND_URL}/videos", timeout=TEST_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "videos" in data and "count" in data:
+                    videos = data["videos"]
+                    has_test_video = any(v.get("video_id") == self.video_id for v in videos) if self.video_id else False
+                    
+                    self.log_test("User Videos", True, f"Retrieved {data['count']} user videos", {
+                        "video_count": data["count"],
+                        "has_test_video": has_test_video,
+                        "user_specific": True
+                    })
+                    return True
+                else:
+                    self.log_test("User Videos", False, "Invalid response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("User Videos", False, "Videos access failed - authentication required")
+            else:
+                self.log_test("User Videos", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Videos", False, f"User videos error: {str(e)}")
+        return False
+    
+    def test_unauthorized_access(self):
+        """Test that endpoints properly reject unauthorized requests"""
+        try:
+            # Remove authorization header
+            if "Authorization" in self.session.headers:
+                del self.session.headers["Authorization"]
+            
+            # Test protected endpoints without auth
+            endpoints_to_test = [
+                ("/videos", "GET"),
+                ("/upload", "POST"),
+                ("/auth/user", "GET")
+            ]
+            
+            unauthorized_count = 0
+            total_endpoints = len(endpoints_to_test)
+            
+            for endpoint, method in endpoints_to_test:
+                try:
+                    if method == "GET":
+                        response = self.session.get(f"{BACKEND_URL}{endpoint}", timeout=TEST_TIMEOUT)
+                    elif method == "POST":
+                        response = self.session.post(f"{BACKEND_URL}{endpoint}", json={}, timeout=TEST_TIMEOUT)
+                    
+                    if response.status_code == 401:
+                        unauthorized_count += 1
+                except:
+                    pass  # Connection errors are acceptable for this test
+            
+            # Restore authorization header
+            if self.access_token:
+                self.session.headers.update({
+                    "Authorization": f"Bearer {self.access_token}"
+                })
+            
+            if unauthorized_count == total_endpoints:
+                self.log_test("Unauthorized Access Protection", True, 
+                            "All protected endpoints properly reject unauthorized requests", {
+                    "protected_endpoints": total_endpoints,
+                    "properly_protected": unauthorized_count
+                })
+                return True
+            else:
+                self.log_test("Unauthorized Access Protection", False, 
+                            f"Some endpoints not properly protected: {unauthorized_count}/{total_endpoints}")
+        except Exception as e:
+            self.log_test("Unauthorized Access Protection", False, f"Protection test error: {str(e)}")
+        return False
+    
+    def run_all_tests(self):
+        """Run all hybrid system tests"""
+        print("🚀 Starting Hybrid MongoDB + Supabase Auth Tests for Video Generation Platform")
+        print(f"Backend URL: {BACKEND_URL}")
+        print("=" * 70)
+        
+        # Hybrid system focused tests
+        tests = [
+            ("Health Check", self.test_health_check),
+            ("User Signup", self.test_user_signup),
+            ("User Signin", self.test_user_signin),
+            ("User Info", self.test_user_info),
+            ("Video Upload", self.test_video_upload),
+            ("Video Status", self.test_video_status),
+            ("Chat Interface", self.test_chat_interface),
+            ("Video Generation", self.test_video_generation),
+            ("User Videos", self.test_user_videos),
+            ("Unauthorized Access Protection", self.test_unauthorized_access),
+        ]
+        
+        passed = 0
+        total = len(tests)
+        
+        for test_name, test_func in tests:
+            print(f"\n🧪 Running: {test_name}")
+            if test_func():
+                passed += 1
+            time.sleep(1)  # Brief pause between tests
+        
+        print("\n" + "=" * 70)
+        print(f"📊 Test Results: {passed}/{total} tests passed")
+        
+        if passed == total:
+            print("🎉 All hybrid system tests passed! MongoDB + Supabase authentication working correctly.")
+        else:
+            print("⚠️  Some tests failed. Check the details above.")
+        
+        return passed, total, self.test_results
+
+def main():
+    """Main test execution"""
+    tester = HybridSystemTester()
+    passed, total, results = tester.run_all_tests()
+    
+    # Print detailed summary
+    print("\n" + "=" * 70)
+    print("📋 DETAILED TEST SUMMARY")
+    print("=" * 70)
+    
+    for result in results:
+        status = "✅" if result["success"] else "❌"
+        print(f"{status} {result['test']}: {result['message']}")
+        if result["details"] and not result["success"]:
+            print(f"   └─ {result['details']}")
+    
+    return passed == total
+
+if __name__ == "__main__":
+    success = main()
+    exit(0 if success else 1)
