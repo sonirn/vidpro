@@ -34,3 +34,4 @@ aiohttp>=3.12.0multidict
 attrs
 yarl
 propcache
+aiohappyeyeballs
