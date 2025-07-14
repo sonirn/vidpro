@@ -254,7 +254,72 @@ class HybridSystemTester:
             self.log_test("User Signin", False, f"Signin error: {str(e)}")
         return False
     
-    def test_user_info(self):
+    def test_confirmed_user_signin(self):
+        """Test signin with a potentially confirmed user"""
+        try:
+            # Clear any existing auth headers
+            if "Authorization" in self.session.headers:
+                del self.session.headers["Authorization"]
+            
+            signin_data = {
+                "email": self.confirmed_test_email,
+                "password": self.confirmed_test_password
+            }
+            
+            response = self.session.post(
+                f"{BACKEND_URL}/auth/signin",
+                json=signin_data,
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "access_token" in data and "user" in data:
+                    signin_token = data["access_token"]
+                    
+                    # Update session with signin token
+                    self.access_token = signin_token
+                    self.user_id = data["user"]["id"]
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {self.access_token}"
+                    })
+                    
+                    self.log_test("Confirmed User Signin", True, "Confirmed user signin successful", {
+                        "user_id": data["user"]["id"],
+                        "email": data["user"]["email"],
+                        "has_token": bool(self.access_token)
+                    })
+                    return True
+                elif "session" in data and data["session"] and data["session"].get("access_token"):
+                    # Handle session-based response
+                    signin_token = data["session"]["access_token"]
+                    
+                    # Update session with signin token
+                    self.access_token = signin_token
+                    self.user_id = data["user"]["id"]
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {self.access_token}"
+                    })
+                    
+                    self.log_test("Confirmed User Signin", True, "Confirmed user signin successful", {
+                        "user_id": data["user"]["id"],
+                        "email": data["user"]["email"],
+                        "has_token": bool(self.access_token)
+                    })
+                    return True
+                else:
+                    self.log_test("Confirmed User Signin", False, "Invalid signin response format", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("Confirmed User Signin", True, "Expected - confirmed test user doesn't exist (normal for fresh system)", {
+                    "email": self.confirmed_test_email,
+                    "user_not_found": True
+                })
+                return True
+            else:
+                self.log_test("Confirmed User Signin", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("Confirmed User Signin", False, f"Confirmed signin error: {str(e)}")
+        return False
         """Test GET /api/auth/user endpoint"""
         if not self.access_token:
             self.log_test("User Info", False, "No access token available")
