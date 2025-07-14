@@ -39,3 +39,4 @@ aiosignal
 frozenlist
 openai
 tiktoken
+tokenizers
