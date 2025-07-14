@@ -123,42 +123,54 @@ def create_indexes():
     """Create database indexes for optimal performance"""
     db = get_db()
     
-    # User indexes
-    db.users.create_index("user_id", unique=True)
-    db.users.create_index("email", unique=True)
+    if db is None:
+        logger.error("Database connection not available")
+        return False
     
-    # Video indexes
-    db.videos.create_index("video_id", unique=True)
-    db.videos.create_index("user_id")
-    db.videos.create_index("created_at")
-    db.videos.create_index("expiry_date")
-    
-    # Plan indexes
-    db.plans.create_index("plan_id", unique=True)
-    db.plans.create_index("video_id")
-    db.plans.create_index("user_id")
-    
-    # Chat session indexes
-    db.chat_sessions.create_index("session_id", unique=True)
-    db.chat_sessions.create_index("video_id")
-    db.chat_sessions.create_index("user_id")
-    
-    # Generation task indexes
-    db.generation_tasks.create_index("task_id", unique=True)
-    db.generation_tasks.create_index("video_id")
-    db.generation_tasks.create_index("user_id")
-    db.generation_tasks.create_index("status")
-    db.generation_tasks.create_index("created_at")
-    
-    logger.info("Database indexes created successfully")
+    try:
+        # User indexes
+        db.users.create_index("user_id", unique=True)
+        db.users.create_index("email", unique=True)
+        
+        # Video indexes
+        db.videos.create_index("video_id", unique=True)
+        db.videos.create_index("user_id")
+        db.videos.create_index("created_at")
+        db.videos.create_index("expiry_date")
+        
+        # Plan indexes
+        db.plans.create_index("plan_id", unique=True)
+        db.plans.create_index("video_id")
+        db.plans.create_index("user_id")
+        
+        # Chat session indexes
+        db.chat_sessions.create_index("session_id", unique=True)
+        db.chat_sessions.create_index("video_id")
+        db.chat_sessions.create_index("user_id")
+        
+        # Generation task indexes
+        db.generation_tasks.create_index("task_id", unique=True)
+        db.generation_tasks.create_index("video_id")
+        db.generation_tasks.create_index("user_id")
+        db.generation_tasks.create_index("status")
+        db.generation_tasks.create_index("created_at")
+        
+        logger.info("Database indexes created successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create indexes: {e}")
+        return False
 
 def initialize_database():
     """Initialize database with schemas and indexes"""
     try:
-        db_config.connect()
-        create_indexes()
-        logger.info("Database initialized successfully")
-        return True
+        if db_config.connect():
+            create_indexes()
+            logger.info("Database initialized successfully")
+            return True
+        else:
+            logger.error("Database initialization failed: Connection failed")
+            return False
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         return False
