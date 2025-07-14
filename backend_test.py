@@ -33,6 +33,10 @@ class HybridSystemTester:
         self.test_user_email = f"testuser{int(time.time())}@gmail.com"
         self.test_user_password = "TestPassword123!"
         
+        # Also try with a potentially confirmed test user
+        self.confirmed_test_email = "test@example.com"
+        self.confirmed_test_password = "TestPassword123!"
+        
     def log_test(self, test_name, success, message, details=None):
         """Log test results"""
         result = {
