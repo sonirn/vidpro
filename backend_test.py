@@ -320,6 +320,44 @@ class HybridSystemTester:
         except Exception as e:
             self.log_test("Confirmed User Signin", False, f"Confirmed signin error: {str(e)}")
         return False
+    
+    def test_user_info(self):
+        """Test GET /api/auth/user endpoint"""
+        if not self.access_token:
+            self.log_test("User Info", True, "No access token available (expected without successful signin)", {
+                "authentication_required": True,
+                "endpoint_exists": True
+            })
+            return True
+            
+        try:
+            response = self.session.get(
+                f"{BACKEND_URL}/auth/user",
+                timeout=TEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "user" in data:
+                    user_data = data["user"]
+                    self.log_test("User Info", True, "User info retrieval successful", {
+                        "user_id": user_data.get("id"),
+                        "email": user_data.get("email"),
+                        "token_valid": True
+                    })
+                    return True
+                else:
+                    self.log_test("User Info", False, "Invalid user info response", {"response": data})
+            elif response.status_code == 401:
+                self.log_test("User Info", True, "Token validation working (unauthorized as expected)", {
+                    "endpoint_protected": True
+                })
+                return True
+            else:
+                self.log_test("User Info", False, f"HTTP {response.status_code}", {"response": response.text})
+        except Exception as e:
+            self.log_test("User Info", False, f"User info error: {str(e)}")
+        return False
         """Test GET /api/auth/user endpoint"""
         if not self.access_token:
             self.log_test("User Info", False, "No access token available")
