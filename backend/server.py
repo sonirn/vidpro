@@ -26,6 +26,12 @@ load_dotenv(ROOT_DIR / '.env')
 from database.mongodb_config import initialize_database, get_db
 from auth.mongodb_auth import get_auth
 
+# Import new video services
+from services.video_service import get_video_service, get_plan_service, get_chat_service, get_task_service
+
+# Import background worker
+from workers.background_worker import get_background_worker, start_background_worker
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
