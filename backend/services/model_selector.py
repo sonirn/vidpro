@@ -362,13 +362,20 @@ class ModelSelector:
             # Select best model
             best_model = max(scores, key=scores.get)
             
-            # Determine provider
+            # Determine provider and model
             if "runway" in best_model:
                 provider = "runway"
                 model = best_model.split("_")[1]  # "gen4" or "gen3"
-            else:
+            elif "veo" in best_model:
                 provider = "veo"
                 model = best_model.replace("_", "-")  # "veo-2" or "veo-3"
+            elif "wan21" in best_model:
+                provider = "wan21"
+                # Extract model type (t2v-1.3b, t2v-14b, i2v-14b, flf2v-14b)
+                model = best_model.replace("wan21_", "").replace("_", "-")
+            else:
+                provider = "unknown"
+                model = best_model
             
             selection_reasoning = {
                 "selected_model": best_model,
