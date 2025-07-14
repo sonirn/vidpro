@@ -30,7 +30,7 @@ class HybridSystemTester:
         self.user_id = None
         self.video_id = None
         self.generation_id = None
-        self.test_user_email = f"testuser_{int(time.time())}@example.com"
+        self.test_user_email = f"testuser{int(time.time())}@gmail.com"
         self.test_user_password = "TestPassword123!"
         
     def log_test(self, test_name, success, message, details=None):
