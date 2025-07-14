@@ -555,23 +555,103 @@ async def chat_with_plan(video_id: str, chat_message: ChatMessage, request: Requ
             updated_plan=current_plan
         )
 
-@api_router.get("/videos")
-async def get_user_videos(request: Request, limit: int = 20):
-    """Get user's video history"""
+@api_router.post("/generate/{video_id}")
+async def start_video_generation(video_id: str, request: Request):
+    """Start video generation process"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
     
-    # Get videos using video service
+    # Get video and check status
     video_service = get_video_service()
-    videos = video_service.get_user_videos(user['user_id'], limit)
+    video = video_service.get_video_by_id(video_id, user['user_id'])
     
-    # Add expiry information
-    for video in videos:
-        expiry_info = video_service.check_video_expiry(video['video_id'])
-        video['expiry_info'] = expiry_info
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
     
-    return {"videos": videos}
+    if video['plan_status'] not in ['generated', 'modified']:
+        raise HTTPException(status_code=400, detail="Video plan not ready")
+    
+    # Check if video has expired
+    expiry_info = video_service.check_video_expiry(video_id)
+    if expiry_info['expired']:
+        raise HTTPException(status_code=410, detail="Video access has expired")
+    
+    # Approve plan
+    plan_service = get_plan_service()
+    plan = plan_service.get_plan_by_video(video_id, user['user_id'])
+    if plan:
+        plan_service.approve_plan(plan['plan_id'], user['user_id'])
+    
+    # Create generation task
+    task_service = get_task_service()
+    generation_task_id = task_service.create_task(
+        video_id=video_id,
+        user_id=user['user_id'],
+        task_type="generation",
+        estimated_duration=600  # 10 minutes
+    )
+    
+    if not generation_task_id:
+        raise HTTPException(status_code=500, detail="Failed to create generation task")
+    
+    # Update video status
+    video_service.update_video_status(video_id, {
+        "generation_status": "processing",
+        "processing_started": True
+    })
+    
+    return {
+        "message": "Video generation started",
+        "task_id": generation_task_id,
+        "video_id": video_id
+    }
+
+@api_router.post("/extend-access/{video_id}")
+async def extend_video_access(video_id: str, request: Request, days: int = 7):
+    """Extend video access period"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    video_service = get_video_service()
+    success = video_service.extend_video_access(video_id, user['user_id'], days)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to extend access")
+    
+    return {"message": f"Access extended by {days} days"}
+
+@api_router.get("/tasks")
+async def get_user_tasks(request: Request, limit: int = 10):
+    """Get user's processing tasks"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    task_service = get_task_service()
+    tasks = task_service.get_user_tasks(user['user_id'], limit)
+    
+    return {"tasks": tasks}
+
+@api_router.get("/task/{task_id}")
+async def get_task_status(task_id: str, request: Request):
+    """Get specific task status"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    task_service = get_task_service()
+    task = task_service.get_task_status(task_id)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Verify task belongs to user
+    if task['user_id'] != user['user_id']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return task
 
 @api_router.get("/health")
 async def health_check():
