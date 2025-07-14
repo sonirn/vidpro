@@ -93,6 +93,36 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+# Authentication endpoints
+@api_router.post("/auth/signup")
+async def sign_up(request: SignUpRequest):
+    """Sign up new user with Supabase"""
+    auth = await get_auth()
+    return await auth.sign_up(request.email, request.password)
+
+@api_router.post("/auth/signin")
+async def sign_in(request: SignInRequest):
+    """Sign in user with Supabase"""
+    auth = await get_auth()
+    return await auth.sign_in(request.email, request.password)
+
+@api_router.post("/auth/refresh")
+async def refresh_token(request: RefreshTokenRequest):
+    """Refresh access token"""
+    auth = await get_auth()
+    return await auth.refresh_token(request.refresh_token)
+
+@api_router.post("/auth/signout")
+async def sign_out(current_user: SupabaseAuthUser = Depends(get_current_user)):
+    """Sign out user"""
+    auth = await get_auth()
+    return await auth.sign_out("")
+
+@api_router.get("/auth/user")
+async def get_current_user_info(current_user: SupabaseAuthUser = Depends(get_current_user)):
+    """Get current user information"""
+    return {"user": current_user}
+
 # Video upload endpoint
 @api_router.post("/upload")
 async def upload_video(
