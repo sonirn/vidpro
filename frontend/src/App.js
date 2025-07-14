@@ -52,8 +52,11 @@ const VideoUpload = ({ onUploadSuccess }) => {
     }
 
     try {
-      const response = await axios.post(`${API}/upload-video`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const response = await axios.post(`${API}/upload`, formData, {
+        headers: { 
+          'Content-Type': 'multipart/form-data',
+          ...getAuthHeaders()
+        }
       });
       
       onUploadSuccess(response.data);
