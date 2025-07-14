@@ -18,28 +18,76 @@ class ModelSelector:
                 "quality": "high", 
                 "speed": "medium",
                 "strengths": ["realistic_motion", "image_to_video", "consistent_quality"],
-                "best_for": ["short_clips", "product_videos", "social_media"]
+                "best_for": ["short_clips", "product_videos", "social_media"],
+                "type": "commercial"
             },
             "runway_gen3": {
                 "max_duration": 10,
                 "quality": "medium",
                 "speed": "fast", 
                 "strengths": ["quick_generation", "cost_effective"],
-                "best_for": ["drafts", "quick_tests", "simple_scenes"]
+                "best_for": ["drafts", "quick_tests", "simple_scenes"],
+                "type": "commercial"
             },
             "veo_2": {
                 "max_duration": 8,
                 "quality": "high",
                 "speed": "medium",
                 "strengths": ["natural_motion", "text_to_video", "creative_scenes"],
-                "best_for": ["artistic_videos", "complex_scenes", "storytelling"]
+                "best_for": ["artistic_videos", "complex_scenes", "storytelling"],
+                "type": "commercial"
             },
             "veo_3": {
                 "max_duration": 10,
                 "quality": "very_high", 
                 "speed": "slow",
                 "strengths": ["physics_simulation", "character_animation", "realistic_lighting"],
-                "best_for": ["professional_videos", "complex_physics", "character_driven"]
+                "best_for": ["professional_videos", "complex_physics", "character_driven"],
+                "type": "commercial"
+            },
+            "wan21_t2v_1_3b": {
+                "max_duration": 60,
+                "quality": "medium",
+                "speed": "fast",
+                "strengths": ["lightweight", "open_source", "cost_effective", "consumer_gpu"],
+                "best_for": ["simple_scenes", "quick_generation", "budget_friendly"],
+                "type": "open_source",
+                "vram_required": "8.19GB",
+                "supports_480p": True,
+                "supports_720p": False
+            },
+            "wan21_t2v_14b": {
+                "max_duration": 60,
+                "quality": "high",
+                "speed": "medium",
+                "strengths": ["high_quality", "open_source", "720p_support", "complex_scenes"],
+                "best_for": ["complex_scenes", "high_quality", "professional_videos"],
+                "type": "open_source",
+                "vram_required": "24GB+",
+                "supports_480p": True,
+                "supports_720p": True
+            },
+            "wan21_i2v_14b": {
+                "max_duration": 60,
+                "quality": "high",
+                "speed": "medium",
+                "strengths": ["image_to_video", "character_consistency", "open_source", "720p_support"],
+                "best_for": ["character_videos", "image_animation", "consistent_character"],
+                "type": "open_source",
+                "vram_required": "24GB+",
+                "supports_480p": False,
+                "supports_720p": True
+            },
+            "wan21_flf2v_14b": {
+                "max_duration": 60,
+                "quality": "high", 
+                "speed": "medium",
+                "strengths": ["first_last_frame", "precise_control", "open_source", "720p_support"],
+                "best_for": ["precise_transitions", "controlled_motion", "specific_outcomes"],
+                "type": "open_source",
+                "vram_required": "24GB+",
+                "supports_480p": False,
+                "supports_720p": True
             }
         }
     
