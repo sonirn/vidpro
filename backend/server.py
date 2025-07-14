@@ -476,7 +476,7 @@ async def get_user_videos(current_user: AuthUser = Depends(get_current_user)):
         
         return [
             VideoStatusResponse(
-                id=video['id'],
+                id=str(video['id']),
                 filename=video['filename'],
                 status=video['status'],
                 analysis=video['analysis'],
