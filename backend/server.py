@@ -1,8 +1,8 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from starlette.middleware.base import BaseHTTPMiddleware
 import os
 import logging
 from pathlib import Path
@@ -26,13 +26,15 @@ from services.storage import storage_manager
 from services.video_processor import video_processor
 from services.audio_generator import audio_generator
 
+# Import Supabase services
+from services.supabase_service import supabase_service
+from services.auth_service import (
+    auth_service, get_current_user, get_current_user_optional, auth_middleware,
+    SignupRequest, LoginRequest, AuthResponse, UserResponse, AuthUser
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
 
 # Create the main app without a prefix
 app = FastAPI(title="Video Generation API", version="1.0.0")
@@ -80,809 +82,609 @@ class VideoGenerationRequest(BaseModel):
     final_plan: str
     session_id: str
 
-class VideoStatus(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+class VideoStatusResponse(BaseModel):
+    id: str
     filename: str
-    status: str  # "uploaded", "analyzing", "analyzed", "planning", "generating", "completed", "error"
+    status: str
     analysis: Optional[Dict[str, Any]] = None
     plan: Optional[str] = None
     final_video_url: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(days=7))
+    created_at: datetime
+    expires_at: datetime
     progress: int = 0
     error_message: Optional[str] = None
 
-class User(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    email: str
-    name: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection and create tables"""
+    try:
+        logger.info("🚀 Starting Video Generation API...")
+        
+        # Initialize Supabase connection
+        await supabase_service.init_connection_pool()
+        
+        # Create tables if they don't exist
+        await supabase_service.create_tables()
+        
+        logger.info("✅ Database initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Startup error: {e}")
+        raise
 
-# Utility functions
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up database connections"""
+    try:
+        await supabase_service.close_connection_pool()
+        logger.info("✅ Database connections closed")
+    except Exception as e:
+        logger.error(f"❌ Shutdown error: {e}")
+
+# Add auth middleware
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Helper functions
 def get_next_gemini_key():
-    """Rotate between Gemini API keys for rate limiting"""
+    """Get next Gemini API key for rotation"""
     global CURRENT_GEMINI_KEY_INDEX
     key = GEMINI_API_KEYS[CURRENT_GEMINI_KEY_INDEX]
     CURRENT_GEMINI_KEY_INDEX = (CURRENT_GEMINI_KEY_INDEX + 1) % len(GEMINI_API_KEYS)
     return key
 
-async def save_uploaded_file(file: UploadFile, video_id: str) -> str:
-    """Save uploaded file to temporary location"""
-    upload_dir = Path("uploads")
-    upload_dir.mkdir(exist_ok=True)
-    
-    file_path = upload_dir / f"{video_id}_{file.filename}"
-    
-    async with aiofiles.open(file_path, 'wb') as f:
-        content = await file.read()
-        await f.write(content)
-    
-    return str(file_path)
-
-async def analyze_video_with_gemini(video_path: str, user_prompt: str = None) -> Dict[str, Any]:
-    """Analyze video using Gemini API"""
-    try:
-        api_key = get_next_gemini_key()
-        
-        # Create Gemini chat instance
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"video_analysis_{uuid.uuid4()}",
-            system_message="""You are an expert video analyst. Analyze the provided video in extreme detail including:
-            1. Visual elements (objects, people, actions, scenes, colors, lighting)
-            2. Audio elements (speech, music, sound effects, ambient sounds)
-            3. Overall narrative and story structure
-            4. Style and mood
-            5. Technical aspects (camera movements, transitions, effects)
-            6. Duration and pacing
-            
-            Provide a comprehensive analysis that will help create a similar video."""
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        # Prepare video file
-        video_file = FileContentWithMimeType(
-            file_path=video_path,
-            mime_type="video/mp4"
-        )
-        
-        # Create analysis prompt
-        analysis_prompt = f"""Please analyze this video in extreme detail. I need to understand:
-        1. What exactly happens in this video from start to finish
-        2. All visual elements, objects, people, and actions
-        3. Audio analysis including speech, music, and sound effects
-        4. The overall style, mood, and narrative structure
-        5. Technical aspects like camera work and transitions
-        
-        {f'Additional context: {user_prompt}' if user_prompt else ''}
-        
-        Provide a comprehensive analysis in JSON format with these sections:
-        - visual_analysis
-        - audio_analysis
-        - narrative_structure
-        - style_and_mood
-        - technical_aspects
-        - duration_and_pacing
-        - key_moments
-        """
-        
-        user_message = UserMessage(
-            text=analysis_prompt,
-            file_contents=[video_file]
-        )
-        
-        response = await chat.send_message(user_message)
-        
-        # Try to parse as JSON, fallback to text
-        try:
-            analysis = json.loads(response)
-        except:
-            analysis = {"raw_analysis": response}
-        
-        return analysis
-        
-    except Exception as e:
-        logger.error(f"Error analyzing video: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Video analysis failed: {str(e)}")
-
-async def generate_video_plan(analysis: Dict[str, Any]) -> str:
-    """Generate video creation plan based on analysis"""
-    try:
-        api_key = get_next_gemini_key()
-        
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"plan_generation_{uuid.uuid4()}",
-            system_message="""You are a professional video production planner. Based on the video analysis provided, create a detailed step-by-step plan to recreate a similar video. 
-
-The plan should include:
-1. Scene breakdown with timing
-2. Visual elements needed for each scene
-3. Audio requirements (music, effects, voiceover)
-4. Transitions and effects
-5. Technical specifications (aspect ratio 9:16, max 60 seconds)
-6. Specific prompts for AI video generation
-
-Make the plan actionable and detailed enough for AI video generation tools."""
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        plan_prompt = f"""Based on this video analysis, create a detailed video production plan:
-
-        Analysis: {json.dumps(analysis, indent=2)}
-        
-        Create a comprehensive plan that includes:
-        1. Scene-by-scene breakdown with timing
-        2. Visual elements and composition for each scene
-        3. Audio strategy (background music, sound effects, voiceover)
-        4. Transitions and visual effects
-        5. Technical specifications (9:16 aspect ratio, under 60 seconds)
-        6. Specific AI generation prompts for each scene
-        7. Post-production steps for combining scenes
-        
-        Make sure the final video will be similar to the original but not an exact copy.
-        """
-        
-        user_message = UserMessage(text=plan_prompt)
-        response = await chat.send_message(user_message)
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error generating plan: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
-
-# API Routes
-@api_router.post("/upload-video", response_model=VideoStatus)
-async def upload_video(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    user_prompt: Optional[str] = None
-):
-    """Upload video file for analysis"""
-    try:
-        # Validate file
-        if not file.filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
-            raise HTTPException(status_code=400, detail="Only video files are allowed")
-        
-        # Create video record
-        video_id = str(uuid.uuid4())
-        video_status = VideoStatus(
-            id=video_id,
-            filename=file.filename,
-            status="uploaded",
-            progress=10
-        )
-        
-        # Save to database
-        await db.videos.insert_one(video_status.dict())
-        
-        # Save file and start analysis in background
-        file_path = await save_uploaded_file(file, video_id)
-        background_tasks.add_task(process_video_analysis, video_id, file_path, user_prompt)
-        
-        return video_status
-        
-    except Exception as e:
-        logger.error(f"Error uploading video: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-
-async def process_video_analysis(video_id: str, file_path: str, user_prompt: str = None):
-    """Background task to analyze video and generate plan"""
+async def process_video_analysis(video_id: str, user_prompt: Optional[str] = None):
+    """Background task to analyze video using Gemini"""
     try:
         # Update status to analyzing
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {"status": "analyzing", "progress": 20}}
+        await supabase_service.update_video_status(video_id, "analyzing", progress=10)
+        
+        # Get video details
+        video = await supabase_service.get_video(video_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Load video file
+        video_path = Path(video['file_path'])
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="Video file not found")
+        
+        # Analyze video with Gemini
+        gemini_key = get_next_gemini_key()
+        
+        with open(video_path, 'rb') as video_file:
+            video_content = video_file.read()
+        
+        # Create Gemini chat client
+        chat_client = LlmChat(api_key=gemini_key, model="gemini-2.0-flash-exp")
+        
+        # Create analysis prompt
+        analysis_prompt = f"""
+        Analyze this video and provide:
+        1. Visual style and aesthetics
+        2. Content themes and narrative
+        3. Technical aspects (lighting, composition, movement)
+        4. Emotional tone and mood
+        5. Key visual elements and patterns
+        
+        User context: {user_prompt if user_prompt else "No specific context provided"}
+        
+        Provide a detailed analysis in JSON format with the following structure:
+        {{
+            "visual_style": "description",
+            "content_themes": ["theme1", "theme2"],
+            "technical_aspects": {{"lighting": "description", "composition": "description", "movement": "description"}},
+            "emotional_tone": "description",
+            "key_elements": ["element1", "element2"],
+            "duration": "detected_duration",
+            "aspect_ratio": "detected_ratio"
+        }}
+        """
+        
+        # Send video to Gemini for analysis
+        file_content = FileContentWithMimeType(
+            content=video_content,
+            mime_type=video['mime_type']
         )
         
-        # Analyze video
-        analysis = await analyze_video_with_gemini(file_path, user_prompt)
+        response = chat_client.chat([
+            UserMessage(content=analysis_prompt, files=[file_content])
+        ])
         
+        # Parse analysis response
+        analysis_text = response.text
+        
+        # Try to extract JSON from response
+        try:
+            import re
+            json_match = re.search(r'\{.*\}', analysis_text, re.DOTALL)
+            if json_match:
+                analysis_json = json.loads(json_match.group())
+            else:
+                analysis_json = {"raw_analysis": analysis_text}
+        except:
+            analysis_json = {"raw_analysis": analysis_text}
+        
+        # Update video with analysis
+        await supabase_service.update_video_status(
+            video_id, "analyzed", progress=50, analysis=analysis_json
+        )
+        
+        # Generate video plan
+        await generate_video_plan(video_id, analysis_json)
+        
+    except Exception as e:
+        logger.error(f"❌ Video analysis failed: {e}")
+        await supabase_service.update_video_status(
+            video_id, "error", error_message=str(e)
+        )
+
+async def generate_video_plan(video_id: str, analysis: Dict[str, Any]):
+    """Generate video creation plan based on analysis"""
+    try:
         # Update status to planning
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {"status": "planning", "progress": 60, "analysis": analysis}}
-        )
+        await supabase_service.update_video_status(video_id, "planning", progress=70)
+        
+        # Create plan generation prompt
+        plan_prompt = f"""
+        Based on this video analysis, create a detailed plan for generating a similar video:
+        
+        Analysis: {json.dumps(analysis, indent=2)}
+        
+        Create a comprehensive video generation plan including:
+        1. Visual style guidelines
+        2. Content structure and narrative flow
+        3. Technical specifications
+        4. Key scenes and transitions
+        5. Specific prompts for AI video generation
+        
+        Format the plan as a detailed text that can be used to generate similar videos.
+        """
+        
+        # Get Gemini key and create chat client
+        gemini_key = get_next_gemini_key()
+        chat_client = LlmChat(api_key=gemini_key, model="gemini-2.0-flash-exp")
         
         # Generate plan
-        plan = await generate_video_plan(analysis)
+        response = chat_client.chat([UserMessage(content=plan_prompt)])
+        plan_text = response.text
         
-        # Update status to analyzed
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {"status": "analyzed", "progress": 80, "plan": plan}}
+        # Update video with plan
+        await supabase_service.update_video_status(
+            video_id, "planned", progress=90, plan=plan_text
         )
         
-        # Clean up temporary file
-        try:
-            os.remove(file_path)
-        except:
-            pass
-            
-    except Exception as e:
-        logger.error(f"Error processing video {video_id}: {str(e)}")
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {"status": "error", "error_message": str(e)}}
-        )
-
-@api_router.get("/video-status/{video_id}", response_model=VideoStatus)
-async def get_video_status(video_id: str):
-    """Get video processing status"""
-    video = await db.videos.find_one({"id": video_id})
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    return VideoStatus(**video)
-
-@api_router.post("/chat", response_model=ChatResponse)
-async def chat_with_plan(request: ChatMessage):
-    """Chat to modify video plan"""
-    try:
-        # Get video from database
-        video = await db.videos.find_one({"id": request.video_id})
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
-        
-        if not video.get("plan"):
-            raise HTTPException(status_code=400, detail="Video plan not ready yet")
-        
-        api_key = get_next_gemini_key()
-        
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=request.session_id,
-            system_message=f"""You are a video production assistant. The user has a video plan and wants to make changes to it. 
-
-Current plan: {video['plan']}
-
-Help the user modify the plan based on their requests. Always respond with:
-1. A conversational response to their request
-2. If they want changes, provide the updated plan
-
-Keep the conversation natural and helpful."""
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        user_message = UserMessage(
-            text=f"Current plan: {video['plan']}\n\nUser message: {request.message}"
-        )
-        
-        response = await chat.send_message(user_message)
-        
-        return ChatResponse(response=response)
+        logger.info(f"✅ Video plan generated successfully: {video_id}")
         
     except Exception as e:
-        logger.error(f"Error in chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+        logger.error(f"❌ Plan generation failed: {e}")
+        await supabase_service.update_video_status(
+            video_id, "error", error_message=str(e)
+        )
 
-@api_router.post("/generate-video")
-async def generate_video(
-    request: VideoGenerationRequest,
-    background_tasks: BackgroundTasks
-):
-    """Start video generation process"""
+# Authentication endpoints
+@api_router.post("/auth/signup", response_model=AuthResponse)
+async def signup(request: SignupRequest):
+    """User registration endpoint"""
     try:
-        # Get video data for analysis
-        video = await db.videos.find_one({"id": request.video_id})
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
-        
-        # Update video status
-        await db.videos.update_one(
-            {"id": request.video_id},
-            {"$set": {"status": "generating", "progress": 90, "plan": request.final_plan}}
+        # Create user with Supabase
+        auth_result = await supabase_service.create_user(
+            request.email, request.password, request.name
         )
         
-        # Start video generation in background with our new service
-        background_tasks.add_task(
-            process_video_generation_new, 
-            request.video_id, 
-            video.get("analysis", {}),
-            request.final_plan
-        )
-        
-        return {"message": "Video generation started", "video_id": request.video_id}
-        
-    except Exception as e:
-        logger.error(f"Error starting video generation: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
-
-async def process_video_generation_new(video_id: str, video_analysis: Dict[str, Any], plan: Dict[str, Any]):
-    """Background task for video generation using our new service"""
-    try:
-        logger.info(f"Starting video generation for {video_id}")
-        
-        # Use our video generation service
-        generation_result = await video_generation_service.generate_video(
-            video_id=video_id,
-            video_analysis=video_analysis,
-            video_plan=plan
-        )
-        
-        # Update video with generation tracking info
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {
-                "generation_id": generation_result["generation_id"],
-                "generation_provider": generation_result["provider"],
-                "generation_model": generation_result["model"],
-                "generation_prompt": generation_result["prompt"],
-                "status": "generating",
-                "progress": 95
-            }}
-        )
-        
-        # Monitor generation progress
-        generation_id = generation_result["generation_id"]
-        max_wait_time = 600  # 10 minutes
-        poll_interval = 15   # 15 seconds
-        start_time = datetime.utcnow()
-        
-        while True:
-            # Check generation status
-            status = await video_generation_service.get_generation_status(generation_id)
-            
-            # Update video progress
-            progress = 95 + (status.get("progress", 0) * 0.05)  # Scale to 95-100%
-            await db.videos.update_one(
-                {"id": video_id},
-                {"$set": {"progress": progress}}
+        if not auth_result.get('success'):
+            raise HTTPException(
+                status_code=400, 
+                detail=auth_result.get('error', 'Failed to create user')
             )
-            
-            if status["status"] == "COMPLETED":
-                # Video generation completed successfully
-                await db.videos.update_one(
-                    {"id": video_id},
-                    {"$set": {
-                        "status": "completed",
-                        "progress": 100,
-                        "final_video_url": status.get("video_url"),
-                        "generation_completed_at": datetime.utcnow().isoformat()
-                    }}
-                )
-                logger.info(f"Video generation completed for {video_id}")
-                break
-                
-            elif status["status"] == "FAILED":
-                # Generation failed
-                await db.videos.update_one(
-                    {"id": video_id},
-                    {"$set": {
-                        "status": "error",
-                        "error_message": status.get("error", "Video generation failed"),
-                        "generation_failed_at": datetime.utcnow().isoformat()
-                    }}
-                )
-                logger.error(f"Video generation failed for {video_id}: {status.get('error')}")
-                break
-                
-            # Check timeout
-            elapsed = (datetime.utcnow() - start_time).total_seconds()
-            if elapsed > max_wait_time:
-                await db.videos.update_one(
-                    {"id": video_id},
-                    {"$set": {
-                        "status": "error",
-                        "error_message": "Video generation timeout",
-                        "generation_failed_at": datetime.utcnow().isoformat()
-                    }}
-                )
-                logger.error(f"Video generation timeout for {video_id}")
-                break
-            
-            # Wait before next check
-            await asyncio.sleep(poll_interval)
         
-    except VideoGenerationError as e:
-        logger.error(f"Video generation service error for {video_id}: {str(e)}")
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {
-                "status": "error", 
-                "error_message": f"Generation service error: {str(e)}",
-                "generation_failed_at": datetime.utcnow().isoformat()
-            }}
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in video generation {video_id}: {str(e)}")
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {
-                "status": "error",
-                "error_message": f"Unexpected error: {str(e)}",
-                "generation_failed_at": datetime.utcnow().isoformat()
-            }}
-        )
-
-@api_router.get("/user-videos")
-async def get_user_videos():
-    """Get all user videos (simplified for MVP)"""
-    videos = await db.videos.find().to_list(100)
-    return [VideoStatus(**video) for video in videos]
-
-@api_router.get("/generation-status/{generation_id}")
-async def get_generation_status(generation_id: str):
-    """Get detailed status of a video generation"""
-    try:
-        status = await video_generation_service.get_generation_status(generation_id)
-        return status
-    except Exception as e:
-        logger.error(f"Error getting generation status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/cancel-generation/{generation_id}")
-async def cancel_generation(generation_id: str):
-    """Cancel an ongoing video generation"""
-    try:
-        result = await video_generation_service.cancel_generation(generation_id)
-        return result
-    except Exception as e:
-        logger.error(f"Error cancelling generation: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/model-recommendations/{video_id}")
-async def get_model_recommendations(video_id: str):
-    """Get AI model recommendations for a video"""
-    try:
-        # Get video data
-        video = await db.videos.find_one({"id": video_id})
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
-        
-        # Analyze requirements and get recommendations
-        requirements = model_selector.analyze_video_requirements(
-            video.get("analysis", {}),
-            video.get("plan", {})
+        # Create access token
+        user = auth_result['user']
+        access_token = auth_service.create_access_token(
+            user.id, request.email, request.name
         )
         
-        recommendations = model_selector.get_model_recommendations(requirements)
+        return AuthResponse(
+            access_token=access_token,
+            user=AuthUser(id=user.id, email=request.email, name=request.name)
+        )
         
-        return recommendations
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting model recommendations: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Signup error: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed")
 
-# === PHASE 3: STORAGE & PROCESSING ENDPOINTS ===
-
-@api_router.post("/storage/upload-generated-video")
-async def upload_generated_video(video_id: str, generation_id: str, file: UploadFile = File(...)):
-    """Upload a generated video to R2 storage"""
+@api_router.post("/auth/login", response_model=AuthResponse)
+async def login(request: LoginRequest):
+    """User login endpoint"""
     try:
-        # Validate file type
+        # Sign in user with Supabase
+        auth_result = await supabase_service.sign_in_user(request.email, request.password)
+        
+        if not auth_result.get('success'):
+            raise HTTPException(
+                status_code=401, 
+                detail=auth_result.get('error', 'Invalid credentials')
+            )
+        
+        # Create access token
+        user = auth_result['user']
+        access_token = auth_service.create_access_token(
+            user.id, request.email, user.user_metadata.get('name')
+        )
+        
+        return AuthResponse(
+            access_token=access_token,
+            user=AuthUser(
+                id=user.id, 
+                email=request.email, 
+                name=user.user_metadata.get('name')
+            )
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: AuthUser = Depends(get_current_user)):
+    """Get current user information"""
+    return UserResponse.from_auth_user(current_user)
+
+# Video endpoints
+@api_router.post("/upload")
+async def upload_video(
+    file: UploadFile = File(...),
+    context: Optional[str] = None,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Upload video file with authentication"""
+    try:
+        # Validate file
         if not file.content_type.startswith('video/'):
             raise HTTPException(status_code=400, detail="File must be a video")
         
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        # Check file size (max 100MB)
+        file_size = 0
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        
         try:
-            content = await file.read()
-            temp_file.write(content)
-            temp_file.close()
-            
-            # Generate storage key
-            storage_key = storage_manager.generate_video_key(video_id, generation_id)
-            
-            # Upload to R2
-            upload_result = await storage_manager.upload_file(
-                temp_file.name, 
-                storage_key,
-                metadata={
-                    'video_id': video_id,
-                    'generation_id': generation_id,
-                    'original_filename': file.filename
-                }
-            )
-            
-            if upload_result['success']:
-                # Update video record with storage info
-                await db.videos.update_one(
-                    {"id": video_id},
-                    {"$set": {
-                        "storage_key": storage_key,
-                        "storage_bucket": upload_result['bucket'],
-                        "file_size": upload_result['file_size'],
-                        "uploaded_at": datetime.utcnow().isoformat(),
-                        "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
-                    }}
-                )
-                
-                # Generate download URL
-                download_url = storage_manager.generate_presigned_url(storage_key, expiration=86400)  # 24 hours
-                
-                return {
-                    "success": True,
-                    "storage_key": storage_key,
-                    "download_url": download_url,
-                    "file_size": upload_result['file_size'],
-                    "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
-                }
-            else:
-                raise HTTPException(status_code=500, detail=f"Upload failed: {upload_result['error']}")
-                
+            async with aiofiles.open(temp_file.name, 'wb') as f:
+                while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                    file_size += len(chunk)
+                    if file_size > 100 * 1024 * 1024:  # 100MB limit
+                        raise HTTPException(status_code=413, detail="File too large")
+                    await f.write(chunk)
         finally:
-            # Clean up temp file
-            if os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
+            await file.seek(0)
         
+        # Generate unique filename
+        video_id = str(uuid.uuid4())
+        file_extension = Path(file.filename).suffix
+        filename = f"{video_id}{file_extension}"
+        
+        # Save to uploads directory
+        uploads_dir = ROOT_DIR / "uploads"
+        uploads_dir.mkdir(exist_ok=True)
+        file_path = uploads_dir / filename
+        
+        # Move temp file to permanent location
+        shutil.move(temp_file.name, file_path)
+        
+        # Create video record in database
+        video_id = await supabase_service.create_video(
+            user_id=current_user.id,
+            filename=filename,
+            original_filename=file.filename,
+            file_path=str(file_path),
+            file_size=file_size,
+            mime_type=file.content_type
+        )
+        
+        logger.info(f"✅ Video uploaded successfully: {video_id}")
+        
+        return {
+            "video_id": video_id,
+            "filename": filename,
+            "message": "Video uploaded successfully"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error uploading generated video: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Video upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
-@api_router.get("/storage/download-url/{video_id}")
-async def get_download_url(video_id: str):
-    """Get a presigned download URL for a video"""
+@api_router.post("/analyze/{video_id}")
+async def analyze_video(
+    video_id: str,
+    request: VideoAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Start video analysis"""
     try:
-        # Get video data
-        video = await db.videos.find_one({"id": video_id})
+        # Verify video belongs to user
+        video = await supabase_service.get_video(video_id, current_user.id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        storage_key = video.get("storage_key")
-        if not storage_key:
-            raise HTTPException(status_code=404, detail="Video file not found in storage")
+        # Start background analysis
+        background_tasks.add_task(
+            process_video_analysis, 
+            video_id, 
+            request.user_prompt
+        )
         
-        # Check if video has expired
-        expires_at = video.get("expires_at")
-        if expires_at:
-            expiry_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-            if datetime.utcnow() > expiry_date.replace(tzinfo=None):
-                raise HTTPException(status_code=410, detail="Video has expired")
+        return {"message": "Video analysis started", "video_id": video_id}
         
-        # Generate download URL
-        download_url = storage_manager.generate_presigned_url(storage_key, expiration=3600)  # 1 hour
-        
-        if download_url:
-            return {
-                "success": True,
-                "download_url": download_url,
-                "video_id": video_id,
-                "expires_in": 3600,
-                "file_size": video.get("file_size", 0)
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Could not generate download URL")
-            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error generating download URL: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Analysis start failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start analysis")
 
-@api_router.post("/processing/convert-to-vertical/{video_id}")
-async def convert_video_to_vertical(video_id: str, background_tasks: BackgroundTasks):
-    """Convert a video to 9:16 vertical format"""
+@api_router.get("/status/{video_id}", response_model=VideoStatusResponse)
+async def get_video_status(
+    video_id: str,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Get video processing status"""
     try:
-        # Get video data
-        video = await db.videos.find_one({"id": video_id})
+        # Get video from database
+        video = await supabase_service.get_video(video_id, current_user.id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        file_path = video.get("file_path")
-        if not file_path or not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Video file not found")
+        return VideoStatusResponse(
+            id=video['id'],
+            filename=video['filename'],
+            status=video['status'],
+            analysis=video['analysis'],
+            plan=video['plan'],
+            final_video_url=video['final_video_url'],
+            created_at=video['created_at'],
+            expires_at=video['expires_at'],
+            progress=video['progress'],
+            error_message=video['error_message']
+        )
         
-        # Start background processing
-        background_tasks.add_task(process_video_conversion, video_id, file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Status check failed: {e}")
+        raise HTTPException(status_code=500, detail="Status check failed")
+
+@api_router.get("/videos", response_model=List[VideoStatusResponse])
+async def get_user_videos(current_user: AuthUser = Depends(get_current_user)):
+    """Get all videos for authenticated user"""
+    try:
+        videos = await supabase_service.get_user_videos(current_user.id)
         
-        # Update status
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {
-                "processing_status": "converting_to_vertical",
-                "processing_started_at": datetime.utcnow().isoformat()
-            }}
+        return [
+            VideoStatusResponse(
+                id=video['id'],
+                filename=video['filename'],
+                status=video['status'],
+                analysis=video['analysis'],
+                plan=video['plan'],
+                final_video_url=video['final_video_url'],
+                created_at=video['created_at'],
+                expires_at=video['expires_at'],
+                progress=video['progress'],
+                error_message=video['error_message']
+            )
+            for video in videos
+        ]
+        
+    except Exception as e:
+        logger.error(f"❌ Get videos failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get videos")
+
+@api_router.post("/chat/{video_id}")
+async def chat_with_video(
+    video_id: str,
+    request: ChatMessage,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Chat to modify video plan"""
+    try:
+        # Verify video belongs to user
+        video = await supabase_service.get_video(video_id, current_user.id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        if not video['plan']:
+            raise HTTPException(status_code=400, detail="Video plan not ready")
+        
+        # Create chat prompt
+        chat_prompt = f"""
+        Current video plan: {video['plan']}
+        
+        User message: {request.message}
+        
+        Based on the user's message, modify the video plan accordingly. 
+        Provide a helpful response and the updated plan if changes are needed.
+        
+        Respond in the format:
+        RESPONSE: [your response to the user]
+        UPDATED_PLAN: [updated plan if changed, or "NO_CHANGE" if no updates needed]
+        """
+        
+        # Get Gemini key and create chat client
+        gemini_key = get_next_gemini_key()
+        chat_client = LlmChat(api_key=gemini_key, model="gemini-2.0-flash-exp")
+        
+        # Get chat response
+        response = chat_client.chat([UserMessage(content=chat_prompt)])
+        response_text = response.text
+        
+        # Parse response
+        response_parts = response_text.split("UPDATED_PLAN:")
+        chat_response = response_parts[0].replace("RESPONSE:", "").strip()
+        
+        updated_plan = None
+        if len(response_parts) > 1:
+            plan_text = response_parts[1].strip()
+            if plan_text != "NO_CHANGE":
+                updated_plan = plan_text
+                # Update video plan in database
+                await supabase_service.update_video_status(
+                    video_id, video['status'], plan=updated_plan
+                )
+        
+        # Save chat message
+        await supabase_service.save_chat_message(
+            current_user.id, video_id, request.session_id, 
+            request.message, chat_response
+        )
+        
+        return ChatResponse(
+            response=chat_response,
+            updated_plan=updated_plan
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Chat failed: {e}")
+        raise HTTPException(status_code=500, detail="Chat failed")
+
+# Video generation endpoints (keeping existing functionality)
+@api_router.post("/generate-video")
+async def generate_video(
+    request: VideoGenerationRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Generate video using AI models"""
+    try:
+        # Verify video belongs to user
+        video = await supabase_service.get_video(request.video_id, current_user.id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Start video generation
+        generation_id = await video_generation_service.start_generation(
+            video_id=request.video_id,
+            plan=request.final_plan,
+            user_id=current_user.id
         )
         
         return {
-            "success": True,
-            "video_id": video_id,
-            "status": "conversion_started",
-            "message": "Video conversion to 9:16 format started"
+            "generation_id": generation_id,
+            "message": "Video generation started",
+            "video_id": request.video_id
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error starting video conversion: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Video generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Video generation failed")
 
-@api_router.get("/processing/video-info/{video_id}")
-async def get_video_processing_info(video_id: str):
-    """Get detailed video processing information"""
+@api_router.get("/generation-status/{generation_id}")
+async def get_generation_status(
+    generation_id: str,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Get video generation status"""
     try:
-        # Get video data
-        video = await db.videos.find_one({"id": video_id})
+        status = await video_generation_service.get_generation_status(
+            generation_id, current_user.id
+        )
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Generation status check failed: {e}")
+        raise HTTPException(status_code=500, detail="Status check failed")
+
+@api_router.get("/model-recommendations/{video_id}")
+async def get_model_recommendations(
+    video_id: str,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Get AI model recommendations for video"""
+    try:
+        # Verify video belongs to user
+        video = await supabase_service.get_video(video_id, current_user.id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        file_path = video.get("file_path")
-        if not file_path or not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Video file not found")
+        recommendations = await model_selector.get_recommendations(video_id)
+        return recommendations
         
-        # Get video info using FFmpeg
-        video_info = await video_processor.get_video_info(file_path)
-        
-        if video_info:
-            return {
-                "success": True,
-                "video_id": video_id,
-                "video_info": video_info
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Could not analyze video")
-            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting video info: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Model recommendations failed: {e}")
+        raise HTTPException(status_code=500, detail="Recommendations failed")
 
-@api_router.post("/audio/generate-speech")
-async def generate_speech_audio(text: str, voice_id: Optional[str] = None):
-    """Generate speech audio using ElevenLabs"""
+@api_router.delete("/cancel-generation/{generation_id}")
+async def cancel_generation(
+    generation_id: str,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Cancel video generation"""
     try:
-        if not audio_generator.enabled:
-            raise HTTPException(status_code=503, detail="Audio generation service not available")
-        
-        # Generate speech
-        result = await audio_generator.generate_speech(text, voice_id)
-        
-        if result['success']:
-            # Upload to R2 storage
-            audio_id = uuid.uuid4().hex
-            storage_key = f"audio/{audio_id}.mp3"
-            
-            upload_result = await storage_manager.upload_file(
-                result['audio_path'],
-                storage_key,
-                metadata={
-                    'type': 'generated_speech',
-                    'voice_id': result['voice_id'],
-                    'text_length': str(result['text_length'])
-                }
-            )
-            
-            if upload_result['success']:
-                # Generate download URL
-                download_url = storage_manager.generate_presigned_url(storage_key, expiration=3600)
-                
-                return {
-                    "success": True,
-                    "audio_id": audio_id,
-                    "storage_key": storage_key,
-                    "download_url": download_url,
-                    "voice_id": result['voice_id'],
-                    "file_size": result['file_size']
-                }
-            else:
-                raise HTTPException(status_code=500, detail=f"Upload failed: {upload_result['error']}")
-        else:
-            raise HTTPException(status_code=500, detail=f"Speech generation failed: {result['error']}")
-            
-    except Exception as e:
-        logger.error(f"Error generating speech: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/audio/voices")
-async def get_available_voices():
-    """Get list of available ElevenLabs voices"""
-    try:
-        if not audio_generator.enabled:
-            raise HTTPException(status_code=503, detail="Audio generation service not available")
-        
-        voices_result = await audio_generator.get_available_voices()
-        
-        if voices_result['success']:
-            return voices_result
-        else:
-            raise HTTPException(status_code=500, detail=f"Could not fetch voices: {voices_result['error']}")
-            
-    except Exception as e:
-        logger.error(f"Error fetching voices: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/storage/cleanup-expired")
-async def cleanup_expired_files():
-    """Clean up files that have exceeded their 7-day expiration"""
-    try:
-        cleanup_result = await storage_manager.cleanup_expired_files()
-        
-        if cleanup_result['success']:
-            # Also clean up database records for expired videos
-            current_time = datetime.utcnow()
-            expired_videos = await db.videos.find({
-                "expires_at": {"$lt": current_time.isoformat()}
-            }).to_list(None)
-            
-            for video in expired_videos:
-                await db.videos.update_one(
-                    {"id": video["id"]},
-                    {"$set": {"status": "expired", "file_expired": True}}
-                )
-            
-            return {
-                "success": True,
-                "storage_cleanup": cleanup_result,
-                "database_records_updated": len(expired_videos)
-            }
-        else:
-            raise HTTPException(status_code=500, detail=f"Cleanup failed: {cleanup_result['error']}")
-            
-    except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Background task for video processing
-async def process_video_conversion(video_id: str, input_path: str):
-    """Background task to convert video to vertical format"""
-    try:
-        logger.info(f"Starting video conversion for {video_id}")
-        
-        # Generate output path
-        output_path = input_path.replace('.mp4', '_vertical.mp4')
-        
-        # Convert to vertical
-        result = await video_processor.convert_to_vertical(input_path, output_path)
-        
-        if result['success']:
-            # Upload converted video to R2
-            storage_key = storage_manager.generate_video_key(video_id, "converted")
-            upload_result = await storage_manager.upload_file(
-                output_path,
-                storage_key,
-                metadata={
-                    'video_id': video_id,
-                    'type': 'converted_vertical',
-                    'original_file': input_path
-                }
-            )
-            
-            if upload_result['success']:
-                # Update video record
-                await db.videos.update_one(
-                    {"id": video_id},
-                    {"$set": {
-                        "processing_status": "conversion_completed",
-                        "converted_storage_key": storage_key,
-                        "converted_file_size": upload_result['file_size'],
-                        "processing_completed_at": datetime.utcnow().isoformat()
-                    }}
-                )
-                logger.info(f"Video conversion completed for {video_id}")
-            else:
-                raise Exception(f"Upload failed: {upload_result['error']}")
-        else:
-            raise Exception(f"Conversion failed: {result['error']}")
-            
-        # Clean up local files
-        if os.path.exists(output_path):
-            os.remove(output_path)
-            
-    except Exception as e:
-        logger.error(f"Video conversion failed for {video_id}: {str(e)}")
-        
-        # Update video record with error
-        await db.videos.update_one(
-            {"id": video_id},
-            {"$set": {
-                "processing_status": "conversion_failed",
-                "processing_error": str(e),
-                "processing_failed_at": datetime.utcnow().isoformat()
-            }}
+        result = await video_generation_service.cancel_generation(
+            generation_id, current_user.id
         )
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Cancel generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Cancel failed")
 
-@api_router.get("/")
-async def root():
-    return {"message": "Video Generation API is running"}
+# Admin endpoints
+@api_router.post("/admin/cleanup-expired")
+async def cleanup_expired_videos(current_user: AuthUser = Depends(get_current_user)):
+    """Clean up expired videos (admin only)"""
+    try:
+        # Simple admin check - in production, implement proper role-based access
+        if not current_user.email.endswith('@admin.com'):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        count = await supabase_service.cleanup_expired_videos()
+        return {"message": f"Cleaned up {count} expired videos"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail="Cleanup failed")
 
-# Include the router in the main app
+# Health check endpoint
+@api_router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+# Add router to app
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "Video Generation API", "version": "1.0.0"}
 
 if __name__ == "__main__":
     import uvicorn
