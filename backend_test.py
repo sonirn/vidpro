@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/backend/.env')
 
 # Configuration
-BACKEND_URL = "https://293971f2-ef4d-4284-898a-f962c4aa37d2.preview.emergentagent.com/api"
+BACKEND_URL = "https://46b73bb3-0b39-4fb1-a40e-58fdeb2129ef.preview.emergentagent.com/api"
 TEST_TIMEOUT = 30
 
 class VideoGenerationAPITester:
