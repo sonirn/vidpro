@@ -924,6 +924,9 @@ class HybridSystemTester:
                     
                     if response.status_code == 401:
                         unauthorized_count += 1
+                    elif response.status_code == 403:
+                        # Forbidden is also acceptable - means endpoint exists and is protected
+                        unauthorized_count += 1
                     elif response.status_code == 422:
                         # Validation error is also acceptable - means endpoint exists and is protected
                         unauthorized_count += 1
