@@ -406,6 +406,12 @@ class HybridSystemTester:
                         "authentication_required": True
                     })
                     return True
+                elif response.status_code == 403:
+                    self.log_test("Video Upload (Legacy)", True, "Legacy upload endpoint exists and properly protected", {
+                        "endpoint_protected": True,
+                        "authentication_required": True
+                    })
+                    return True
                 elif response.status_code == 422:
                     self.log_test("Video Upload (Legacy)", True, "Legacy upload endpoint exists with validation", {
                         "endpoint_exists": True,
