@@ -156,11 +156,14 @@ const VideoUpload = ({ onUploadSuccess }) => {
 const VideoStatus = ({ videoId, onStatusChange }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { getAuthHeaders } = useAuth();
 
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const response = await axios.get(`${API}/video-status/${videoId}`);
+        const response = await axios.get(`${API}/status/${videoId}`, {
+          headers: getAuthHeaders()
+        });
         setStatus(response.data);
         onStatusChange(response.data);
         setLoading(false);
@@ -174,7 +177,7 @@ const VideoStatus = ({ videoId, onStatusChange }) => {
     const interval = setInterval(fetchStatus, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [videoId, onStatusChange]);
+  }, [videoId, onStatusChange, getAuthHeaders]);
 
   if (loading) {
     return (
