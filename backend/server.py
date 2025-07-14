@@ -417,26 +417,66 @@ async def get_video_status(video_id: str, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
     
-    db = get_db()
-    video = db.videos.find_one({"video_id": video_id, "user_id": user['user_id']})
+    # Get video using video service
+    video_service = get_video_service()
+    video = video_service.get_video_by_id(video_id, user['user_id'])
     
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     
-    # Calculate progress based on status
+    # Check if video has expired
+    expiry_info = video_service.check_video_expiry(video_id)
+    if expiry_info['expired']:
+        raise HTTPException(status_code=410, detail="Video access has expired")
+    
+    # Get current task status
+    task_service = get_task_service()
+    user_tasks = task_service.get_user_tasks(user['user_id'], 10)
+    current_task = None
+    for task in user_tasks:
+        if task['video_id'] == video_id and task['status'] in ['pending', 'processing']:
+            current_task = task
+            break
+    
+    # Calculate overall progress
     progress = 0
+    status_message = "Initializing"
+    
     if video['analysis_status'] == 'complete':
-        progress = 30
-    if video['plan_status'] == 'generated':
+        progress = 25
+        status_message = "Analysis complete"
+    
+    if video['plan_status'] in ['generated', 'modified']:
         progress = 50
+        status_message = "Plan ready for review"
+    
+    if video['generation_status'] == 'processing':
+        progress = 75
+        status_message = "Generating video"
+    
     if video['generation_status'] == 'complete':
         progress = 100
+        status_message = "Video ready for download"
+    
+    # Update with current task progress if available
+    if current_task:
+        task_progress = current_task.get('progress', 0)
+        if current_task['task_type'] == 'analysis' and task_progress > 0:
+            progress = min(25, task_progress * 0.25)
+        elif current_task['task_type'] == 'planning' and task_progress > 0:
+            progress = 25 + (task_progress * 0.25)
+        elif current_task['task_type'] == 'generation' and task_progress > 0:
+            progress = 50 + (task_progress * 0.25)
+        elif current_task['task_type'] == 'processing' and task_progress > 0:
+            progress = 75 + (task_progress * 0.25)
+        
+        status_message = current_task.get('current_step', status_message)
     
     return VideoStatusResponse(
         video_id=video_id,
         status=video['analysis_status'],
-        progress=progress,
-        message=f"Analysis: {video['analysis_status']}, Plan: {video['plan_status']}",
+        progress=int(progress),
+        message=status_message,
         analysis_result=video.get('analysis_result'),
         generation_plan=video.get('generation_plan')
     )
