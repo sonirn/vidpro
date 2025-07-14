@@ -271,6 +271,7 @@ const ChatInterface = ({ videoId, currentPlan, onPlanUpdate }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [sessionId] = useState(() => `session_${Date.now()}`);
+  const { getAuthHeaders } = useAuth();
 
   const sendMessage = async () => {
     if (!inputMessage.trim()) return;
@@ -280,10 +281,12 @@ const ChatInterface = ({ videoId, currentPlan, onPlanUpdate }) => {
     setInputMessage('');
 
     try {
-      const response = await axios.post(`${API}/chat`, {
+      const response = await axios.post(`${API}/chat/${videoId}`, {
         message: inputMessage,
         video_id: videoId,
         session_id: sessionId
+      }, {
+        headers: getAuthHeaders()
       });
 
       const botMessage = { role: 'assistant', content: response.data.response };
