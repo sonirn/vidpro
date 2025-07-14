@@ -32,7 +32,8 @@ class MongoDBConfig:
     def get_database(self):
         """Get database instance"""
         if not self.db:
-            self.connect()
+            if not self.connect():
+                return None
         return self.db
     
     def close_connection(self):
