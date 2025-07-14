@@ -166,7 +166,7 @@ async def process_video_analysis(video_id: str, user_prompt: Optional[str] = Non
             video_content = video_file.read()
         
         # Create Gemini chat client
-        chat_client = LlmChat(api_key=gemini_key, model="gemini-2.0-flash-exp")
+        chat_client = LlmChat(api_key=gemini_key)
         
         # Create analysis prompt
         analysis_prompt = f"""
