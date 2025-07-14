@@ -732,11 +732,16 @@ class HybridSystemTester:
             ("User Signup", self.test_user_signup),
             ("User Signin", self.test_user_signin),
             ("User Info", self.test_user_info),
-            ("Video Upload", self.test_video_upload),
+            ("Video Upload (New)", self.test_video_upload_new),
+            ("Video Upload (Legacy)", self.test_video_upload),
+            ("Video Info", self.test_video_info),
             ("Video Status", self.test_video_status),
+            ("Video Analysis", self.test_video_analysis),
+            ("Plan Generation", self.test_plan_generation),
             ("Chat Interface", self.test_chat_interface),
             ("Video Generation", self.test_video_generation),
-            ("User Videos", self.test_user_videos),
+            ("User Videos (New)", self.test_user_videos_new),
+            ("User Videos (Legacy)", self.test_user_videos),
             ("Unauthorized Access Protection", self.test_unauthorized_access),
         ]
         
