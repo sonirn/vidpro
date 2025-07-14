@@ -41,3 +41,4 @@ openai
 tiktoken
 tokenizers
 jinja2
+supabase
