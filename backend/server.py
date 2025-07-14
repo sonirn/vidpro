@@ -556,17 +556,20 @@ async def chat_with_plan(video_id: str, chat_message: ChatMessage, request: Requ
         )
 
 @api_router.get("/videos")
-async def get_user_videos(request: Request):
+async def get_user_videos(request: Request, limit: int = 20):
     """Get user's video history"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="User not authenticated")
     
-    db = get_db()
-    videos = list(db.videos.find(
-        {"user_id": user['user_id']},
-        {"_id": 0}  # Exclude MongoDB ObjectId
-    ).sort("created_at", -1))
+    # Get videos using video service
+    video_service = get_video_service()
+    videos = video_service.get_user_videos(user['user_id'], limit)
+    
+    # Add expiry information
+    for video in videos:
+        expiry_info = video_service.check_video_expiry(video['video_id'])
+        video['expiry_info'] = expiry_info
     
     return {"videos": videos}
 
