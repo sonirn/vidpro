@@ -1565,7 +1565,7 @@ class HybridSystemTester:
         print(f"📊 Test Results: {passed}/{total} tests passed")
         
         if passed == total:
-            print("🎉 All hybrid system tests passed! MongoDB + Supabase authentication working correctly.")
+            print("🎉 All Wan 2.1 integration tests passed! Video generation system working correctly.")
         else:
             print("⚠️  Some tests failed. Check the details above.")
         
@@ -1578,7 +1578,7 @@ def main():
     
     # Print detailed summary
     print("\n" + "=" * 70)
-    print("📋 DETAILED TEST SUMMARY")
+    print("📋 DETAILED WAN 2.1 INTEGRATION TEST SUMMARY")
     print("=" * 70)
     
     for result in results:
