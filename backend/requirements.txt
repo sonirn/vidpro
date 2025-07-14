@@ -29,3 +29,9 @@ ffmpeg-python>=0.2.0
 pillow>=10.0.0
 httpx>=0.24.0
 litellm
+supabase>=2.3.0
+asyncpg>=0.29.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+pydantic-settings>=2.0.0
+bcrypt>=4.0.0
